@@ -24,16 +24,16 @@
 - [x] 1.2.9 EventBridgeスケジュール設計
 
 ### 1.3 AWS環境構築 (IaC)
-- [ ] 1.3.1 IaCツールの選定（CloudFormation vs Terraform）とセットアップ
-- [ ] 1.3.2 ネットワーク基盤のコード化（VPC, Subnet, Route Table, NAT Gateway）
-- [ ] 1.3.3 IAMロール・ポリシーのコード化（Lambda, API Gateway用など）
-- [ ] 1.3.4 S3バケットのコード化（フロントエンドホスティング用、ログ保管用）
-- [ ] 1.3.5 CloudFrontディストリビューションのコード化
-- [ ] 1.3.6 DynamoDBテーブルのコード化
-- [ ] 1.3.7 Cognitoユーザープールのコード化
-- [ ] 1.3.8 EventBridge（Scheduler）の基本設定をコード化
-- [ ] 1.3.9 IaCコードのバージョン管理設定 (Git)
-- [ ] 1.3.10 CI/CDパイプラインへのIaCデプロイステップの統合
+- [x] 1.3.1 IaCツールの選定（CloudFormation vs Terraform）とセットアップ
+- [x] 1.3.2 ネットワーク基盤のコード化（VPC, Subnet, Route Table, NAT Gateway）
+- [x] 1.3.3 IAMロール・ポリシーのコード化（Lambda, API Gateway用など）
+- [x] 1.3.4 S3バケットのコード化（フロントエンドホスティング用、ログ保管用）
+- [x] 1.3.5 CloudFrontディストリビューションのコード化
+- [x] 1.3.6 DynamoDBテーブルのコード化
+- [x] 1.3.7 Cognitoユーザープールのコード化
+- [x] 1.3.8 EventBridge（Scheduler）の基本設定をコード化
+- [x] 1.3.9 IaCコードのバージョン管理設定 (Git)
+- [x] 1.3.10 CI/CDパイプラインへのIaCデプロイステップの統合
 
 ## 2. コア機能実装フェーズ（フェーズ1: MVP）
 
