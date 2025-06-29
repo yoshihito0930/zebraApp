@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary-color: #82C2A9;
+  --accent-color: #FF463C;
+  --system-gray: #8E8E93;
+  --background-color: #F2F2F7;
+  --separator-color: #C6C6C8;
+}
+
+body {
+  font-family: "SF Pro JP", "Hiragino Kaku Gothic ProN", "Hiragino Sans", sans-serif;
+  color: #333;
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-white px-4 py-2 rounded-lg hover:bg-opacity-90 transition-all;
+  }
+  
+  .btn-secondary {
+    @apply border border-primary text-primary px-4 py-2 rounded-lg hover:bg-primary hover:bg-opacity-5 transition-all;
+  }
+  
+  .btn-accent {
+    @apply bg-accent text-white px-4 py-2 rounded-lg hover:bg-opacity-90 transition-all;
+  }
+}

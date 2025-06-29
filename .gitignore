@@ -1,0 +1,7 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+terraform/dummy-lambda.zip
+terraform_backend_setup/terraform.tfstate

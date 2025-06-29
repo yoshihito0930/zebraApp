@@ -1,0 +1,17 @@
+FROM golang:1.21-alpine
+
+WORKDIR /app
+
+# 開発環境用の依存関係のインストール
+RUN go install github.com/cosmtrek/air@latest
+
+# Go依存関係をキャッシュするためのレイヤー
+COPY go.mod go.sum* ./
+RUN go mod download
+
+COPY . .
+
+# Go言語のホットリロードツール「Air」を使用
+CMD ["air", "-c", ".air.toml"]
+
+EXPOSE 8080
