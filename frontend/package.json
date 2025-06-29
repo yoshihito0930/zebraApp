@@ -9,19 +9,19 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@fullcalendar/core": "^6.1.9",
+    "@fullcalendar/daygrid": "^6.1.9",
+    "@fullcalendar/interaction": "^6.1.9",
+    "@fullcalendar/react": "^6.1.9",
+    "@fullcalendar/timegrid": "^6.1.9",
     "@headlessui/react": "^1.7.17",
     "@heroicons/react": "^2.0.18",
     "axios": "^1.6.2",
     "next": "14.0.3",
-    "react": "^18",
+    "react": "^18.3.1",
     "react-dom": "^18",
     "react-hook-form": "^7.48.2",
-    "zod": "^3.22.4",
-    "@fullcalendar/core": "^6.1.9",
-    "@fullcalendar/daygrid": "^6.1.9",
-    "@fullcalendar/react": "^6.1.9",
-    "@fullcalendar/timegrid": "^6.1.9",
-    "@fullcalendar/interaction": "^6.1.9"
+    "zod": "^3.22.4"
   },
   "devDependencies": {
     "@types/node": "^20",

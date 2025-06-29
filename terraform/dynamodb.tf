@@ -2,17 +2,38 @@
 # DynamoDB Table: Users
 # ------------------------------------------------------------------------------
 resource "aws_dynamodb_table" "users" {
-  name             = "Users"
+  name             = "studio-booking-users"
   billing_mode     = "PAY_PER_REQUEST"
-  hash_key         = "userId"
+  hash_key         = "PK"
 
   attribute {
-    name = "userId"
+    name = "PK"
     type = "S"
   }
 
+  attribute {
+    name = "email"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name               = "EmailIndex"
+    hash_key           = "email"
+    projection_type    = "ALL"
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
   tags = {
-    Name = "UsersTable"
+    Name        = "UsersTable"
+    Environment = "production"
+    Project     = "StudioBooking"
+  }
+
+  point_in_time_recovery {
+    enabled = true
   }
 }
 
@@ -20,17 +41,33 @@ resource "aws_dynamodb_table" "users" {
 # DynamoDB Table: UserAgreements
 # ------------------------------------------------------------------------------
 resource "aws_dynamodb_table" "user_agreements" {
-  name             = "UserAgreements"
+  name             = "studio-booking-user-agreements"
   billing_mode     = "PAY_PER_REQUEST"
-  hash_key         = "agreementId"
+  hash_key         = "PK"
+  range_key        = "SK"
 
   attribute {
-    name = "agreementId"
+    name = "PK"
     type = "S"
   }
 
+  attribute {
+    name = "SK"
+    type = "S"
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
   tags = {
-    Name = "UserAgreementsTable"
+    Name        = "UserAgreementsTable"
+    Environment = "production"
+    Project     = "StudioBooking"
+  }
+
+  point_in_time_recovery {
+    enabled = true
   }
 }
 
@@ -110,16 +147,43 @@ resource "aws_dynamodb_table" "notifications" {
 # DynamoDB Table: TermsOfService
 # ------------------------------------------------------------------------------
 resource "aws_dynamodb_table" "terms_of_service" {
-  name             = "TermsOfService"
+  name             = "studio-booking-terms-of-service"
   billing_mode     = "PAY_PER_REQUEST"
-  hash_key         = "versionId" # Assuming versionId for terms of service
+  hash_key         = "PK"
 
   attribute {
-    name = "versionId"
+    name = "PK"
     type = "S"
   }
 
+  attribute {
+    name = "STATUS"
+    type = "S"
+  }
+
+  attribute {
+    name = "effectiveDate"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name               = "StatusEffectiveDateIndex"
+    hash_key           = "STATUS"
+    range_key          = "effectiveDate"
+    projection_type    = "ALL"
+  }
+
+  server_side_encryption {
+    enabled = true
+  }
+
   tags = {
-    Name = "TermsOfServiceTable"
+    Name        = "TermsOfServiceTable"
+    Environment = "production"
+    Project     = "StudioBooking"
+  }
+
+  point_in_time_recovery {
+    enabled = true
   }
 }
