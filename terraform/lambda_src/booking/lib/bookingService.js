@@ -6,7 +6,8 @@ const {
   BOOKING_TYPE,
   CANCELLATION_FEE_RATES,
   BUSINESS_HOURS,
-  TEMPORARY_BOOKING_DEADLINE_DAYS
+  TEMPORARY_BOOKING_DEADLINE_DAYS,
+  KEEP_SYSTEM
 } = require('./constants');
 
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
@@ -38,7 +39,7 @@ function calculateConfirmationDeadline(startTime) {
 }
 
 /**
- * 時間枠の重複チェック
+ * 時間枠のキープ状況チェック（キープシステム対応）
  */
 async function checkTimeSlotAvailability(startTime, endTime, excludeBookingId = null) {
   const startDate = new Date(startTime);
@@ -57,8 +58,8 @@ async function checkTimeSlotAvailability(startTime, endTime, excludeBookingId = 
 
   const result = await dynamoDB.query(params).promise();
   
-  // 時間枠の重複をチェック
-  const conflictingBookings = result.Items.filter(item => {
+  // 時間枠の重複する予約を取得
+  const overlappingBookings = result.Items.filter(item => {
     // 除外する予約IDがある場合はスキップ
     if (excludeBookingId && item.bookingId === excludeBookingId) {
       return false;
@@ -76,7 +77,8 @@ async function checkTimeSlotAvailability(startTime, endTime, excludeBookingId = 
     return (startDate < existingEnd && endDate > existingStart);
   });
 
-  return conflictingBookings.length === 0;
+  // キープシステム対応：第三キープまで予約可能
+  return overlappingBookings.length < KEEP_SYSTEM.MAX_KEEP_COUNT;
 }
 
 /**
@@ -111,9 +113,9 @@ function generateAvailableTimeSlots(date) {
 }
 
 /**
- * 予約データをBookingsテーブル用に変換
+ * 予約データをBookingsテーブル用に変換（キープシステム対応）
  */
-function formatBookingForTable(bookingData, userId, userInfo) {
+function formatBookingForTable(bookingData, userId, userInfo, keepOrder = 1, isKeep = false) {
   const bookingId = uuidv4();
   const now = new Date().toISOString();
   
@@ -160,6 +162,11 @@ function formatBookingForTable(bookingData, userId, userInfo) {
     shootingDetails: bookingData.shootingDetails || '',
     protection: bookingData.protection || '',
     peopleCount: bookingData.peopleCount,
+    
+    // キープシステム関連
+    keepOrder: keepOrder,
+    isKeep: isKeep,
+    
     confirmationDeadline: confirmationDeadline ? confirmationDeadline.toISOString() : null,
     automaticCancellation: bookingData.bookingType === BOOKING_TYPE.TEMPORARY,
     cancellationFeePercent,
@@ -172,7 +179,7 @@ function formatBookingForTable(bookingData, userId, userInfo) {
 }
 
 /**
- * カレンダーテーブル用データを生成
+ * カレンダーテーブル用データを生成（キープシステム対応）
  */
 function formatCalendarEntry(bookingData) {
   const startDate = new Date(bookingData.startTime).toISOString().split('T')[0];
@@ -181,13 +188,15 @@ function formatCalendarEntry(bookingData) {
   
   return {
     PK: `DATE#${startDate}`,
-    SK: `TIME#${startTime}#${endTime}`,
+    SK: `TIME#${startTime}#${endTime}#${bookingData.bookingId}`, // 複数予約に対応するためbookingIdを含める
     bookingId: bookingData.bookingId,
     userId: bookingData.userId,
     status: bookingData.status,
     bookingType: bookingData.bookingType,
     startTime: bookingData.startTime,
-    endTime: bookingData.endTime
+    endTime: bookingData.endTime,
+    keepOrder: bookingData.keepOrder || 1,
+    isKeep: bookingData.isKeep || false
   };
 }
 

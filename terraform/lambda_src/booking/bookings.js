@@ -4,7 +4,8 @@ const {
   BOOKING_STATUS, 
   BOOKING_TYPE,
   ERROR_CODES, 
-  RESPONSE_HEADERS 
+  RESPONSE_HEADERS,
+  BOOKING_INTERVALS
 } = require('./lib/constants');
 const { 
   validateBookingRequest, 
@@ -22,6 +23,15 @@ const {
   deleteBookingTransaction,
   calculateCancellationFeePercent
 } = require('./lib/bookingService');
+const {
+  determineKeepOrder,
+  promoteKeepBookings,
+  getKeepStatusDetail,
+  getBookingKeepOrder
+} = require('./lib/keepSystem');
+const {
+  validateBookingRequest: validateBusinessRules
+} = require('./lib/businessRules');
 
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
 
@@ -40,7 +50,9 @@ exports.handler = async (event) => {
     
     switch (method) {
       case 'GET':
-        if (pathParameters.id) {
+        if (path.includes('/keep-status')) {
+          return await handleGetKeepStatus(event);
+        } else if (pathParameters.id) {
           return await handleGetBooking(event);
         } else {
           return await handleListBookings(event);
@@ -192,7 +204,7 @@ async function handleGetBooking(event) {
 }
 
 /**
- * 新規予約作成
+ * 新規予約作成（キープシステム対応）
  */
 async function handleCreateBooking(event) {
   const userId = getUserIdFromEvent(event);
@@ -202,10 +214,17 @@ async function handleCreateBooking(event) {
   
   const requestBody = JSON.parse(event.body);
   
-  // 入力検証
+  // 基本入力検証
   const validationErrors = validateBookingRequest(requestBody);
   if (validationErrors.length > 0) {
     return createErrorResponse(400, ERROR_CODES.INVALID_PARAMETERS, validationErrors.join(' '));
+  }
+  
+  // 業務ルール検証（予約間隔、営業時間など）
+  const intervalMinutes = requestBody.intervalMinutes || BOOKING_INTERVALS.DEFAULT;
+  const businessRuleErrors = validateBusinessRules(requestBody, intervalMinutes);
+  if (businessRuleErrors.length > 0) {
+    return createErrorResponse(400, ERROR_CODES.INVALID_BOOKING_INTERVAL, businessRuleErrors.join(' '));
   }
   
   try {
@@ -215,20 +234,33 @@ async function handleCreateBooking(event) {
       return createErrorResponse(404, ERROR_CODES.NOT_FOUND, 'ユーザーが見つかりません。');
     }
     
-    // 時間枠の空き状況チェック
-    const isAvailable = await checkTimeSlotAvailability(requestBody.startTime, requestBody.endTime);
-    if (!isAvailable) {
-      return createErrorResponse(409, ERROR_CODES.TIME_SLOT_UNAVAILABLE, '指定された時間枠は既に予約されています。');
+    // キープシステムでの予約可能性チェック
+    const keepResult = await determineKeepOrder(requestBody.startTime, requestBody.endTime);
+    if (!keepResult.canBook) {
+      return createErrorResponse(409, ERROR_CODES.KEEP_LIMIT_EXCEEDED, keepResult.message);
     }
     
-    // 予約データの作成
-    const bookingData = formatBookingForTable(requestBody, userId, userInfo);
+    // 予約データの作成（キープ情報を含む）
+    const bookingData = formatBookingForTable(
+      requestBody, 
+      userId, 
+      userInfo, 
+      keepResult.keepOrder, 
+      keepResult.isKeep
+    );
     const calendarData = formatCalendarEntry(bookingData);
     
     // トランザクションで予約作成
     await createBookingTransaction(bookingData, calendarData);
     
+    // レスポンス用データにキープ情報を追加
     const response = formatBookingForResponse(bookingData);
+    response.keepInfo = {
+      keepOrder: keepResult.keepOrder,
+      isKeep: keepResult.isKeep,
+      message: keepResult.message
+    };
+    
     return createSuccessResponse(201, response);
     
   } catch (error) {
@@ -236,7 +268,7 @@ async function handleCreateBooking(event) {
     
     // トランザクション競合エラーのハンドリング
     if (error.code === 'TransactionCanceledException') {
-      return createErrorResponse(409, ERROR_CODES.TIME_SLOT_UNAVAILABLE, '指定された時間枠は既に予約されています。');
+      return createErrorResponse(409, ERROR_CODES.TIME_SLOT_UNAVAILABLE, 'キープ順序の変更により予約できませんでした。再度お試しください。');
     }
     
     return createErrorResponse(500, ERROR_CODES.SERVER_ERROR, '予約作成中にエラーが発生しました。');
@@ -328,7 +360,7 @@ async function handleUpdateBooking(event) {
 }
 
 /**
- * 予約キャンセル
+ * 予約キャンセル（キープ繰り上がり処理対応）
  */
 async function handleCancelBooking(event) {
   const userId = getUserIdFromEvent(event);
@@ -358,6 +390,9 @@ async function handleCancelBooking(event) {
     // キャンセル料率を計算
     const cancellationFeePercent = calculateCancellationFeePercent(existingBooking.startTime);
     
+    // キャンセルされる予約のキープ順序を取得
+    const cancelledKeepOrder = existingBooking.keepOrder || 1;
+    
     // 予約ステータスを更新
     const updatedBookingData = {
       ...existingBooking,
@@ -369,7 +404,7 @@ async function handleCancelBooking(event) {
     // GSIキーを更新
     updatedBookingData.GSI2PK = `STATUS#${BOOKING_STATUS.CANCELLED}`;
     
-    // カレンダーデータを削除（キャンセルされた予約は表示しない）
+    // カレンダーデータを削除
     const startDate = new Date(existingBooking.startTime).toISOString().split('T')[0];
     const startTime = new Date(existingBooking.startTime).toISOString().split('T')[1].slice(0, 8);
     const endTime = new Date(existingBooking.endTime).toISOString().split('T')[1].slice(0, 8);
@@ -378,7 +413,7 @@ async function handleCancelBooking(event) {
       `BOOKING#${bookingId}`,
       `USER#${userId}`,
       `DATE#${startDate}`,
-      `TIME#${startTime}#${endTime}`
+      `TIME#${startTime}#${endTime}#${bookingId}`
     );
     
     // Bookingsテーブルにキャンセル情報を保存
@@ -387,9 +422,18 @@ async function handleCancelBooking(event) {
       Item: updatedBookingData
     }).promise();
     
+    // キープ繰り上がり処理
+    const promotedBookings = await promoteKeepBookings(
+      bookingId,
+      existingBooking.startTime,
+      existingBooking.endTime,
+      cancelledKeepOrder
+    );
+    
     const response = {
       cancellationFeePercent,
-      booking: formatBookingForResponse(updatedBookingData)
+      booking: formatBookingForResponse(updatedBookingData),
+      promotedBookings: promotedBookings.map(formatBookingForResponse)
     };
     
     return createSuccessResponse(200, response);
@@ -397,6 +441,54 @@ async function handleCancelBooking(event) {
   } catch (error) {
     console.error('Cancel booking error:', error);
     return createErrorResponse(500, ERROR_CODES.SERVER_ERROR, '予約キャンセル中にエラーが発生しました。');
+  }
+}
+
+/**
+ * キープ状況確認
+ * GET /api/bookings/keep-status?startTime=xxx&endTime=xxx
+ */
+async function handleGetKeepStatus(event) {
+  const userId = getUserIdFromEvent(event);
+  if (!userId) {
+    return createErrorResponse(401, ERROR_CODES.UNAUTHORIZED, '認証が必要です。');
+  }
+  
+  const queryParams = event.queryStringParameters || {};
+  const { startTime, endTime } = queryParams;
+  
+  if (!startTime || !endTime) {
+    return createErrorResponse(400, ERROR_CODES.INVALID_PARAMETERS, '開始時間と終了時間が必要です。');
+  }
+  
+  try {
+    // 基本的な日時検証
+    if (!isValidISODateTime(startTime) || !isValidISODateTime(endTime)) {
+      return createErrorResponse(400, ERROR_CODES.INVALID_PARAMETERS, '日時の形式が無効です。');
+    }
+    
+    // キープ状況の詳細を取得
+    const keepStatusDetail = await getKeepStatusDetail(startTime, endTime);
+    
+    // 新規予約の可能性を確認
+    const keepResult = await determineKeepOrder(startTime, endTime);
+    
+    const response = {
+      timeSlot: {
+        startTime,
+        endTime
+      },
+      keepStatus: keepStatusDetail,
+      canBook: keepResult.canBook,
+      nextKeepOrder: keepResult.keepOrder,
+      message: keepResult.message
+    };
+    
+    return createSuccessResponse(200, response);
+    
+  } catch (error) {
+    console.error('Get keep status error:', error);
+    return createErrorResponse(500, ERROR_CODES.SERVER_ERROR, 'キープ状況の取得中にエラーが発生しました。');
   }
 }
 
@@ -455,6 +547,19 @@ async function handleConfirmTemporaryBooking(event) {
     console.error('Confirm booking error:', error);
     return createErrorResponse(500, ERROR_CODES.SERVER_ERROR, '本予約への変更中にエラーが発生しました。');
   }
+}
+
+/**
+ * ヘルパー関数：ISO8601日時形式の検証
+ */
+function isValidISODateTime(dateTimeString) {
+  const isoDateTimeRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z?$/;
+  if (!isoDateTimeRegex.test(dateTimeString)) {
+    return false;
+  }
+  
+  const date = new Date(dateTimeString);
+  return !isNaN(date.getTime());
 }
 
 /**

@@ -103,7 +103,7 @@
   - createdAt: String (ISO日時形式)
   - updatedAt: String (ISO日時形式)
 
-#### 4.2.2 Bookings テーブル
+#### 4.2.2 Bookings テーブル（キープシステム対応）
 - PK: `BOOKING#<bookingId>` (String)
 - SK: `USER#<userId>` (String)
 - GSI1-PK: `USER#<userId>` (String)
@@ -117,6 +117,8 @@
   - bookingType: String ('temporary', 'confirmed')
   - purpose: String
   - peopleCount: Number
+  - keepOrder: Number (キープ順序: 1=第一予約, 2=第二キープ, 3=第三キープ)
+  - isKeep: Boolean (キープ予約かどうか)
   - confirmationDeadline: String (ISO日時形式)
   - automaticCancellation: Boolean
   - cancellationFeePercent: Number
@@ -130,14 +132,16 @@
   - createdAt: String (ISO日時形式)
   - updatedAt: String (ISO日時形式)
 
-#### 4.2.3 Calendar テーブル
+#### 4.2.3 Calendar テーブル（キープシステム対応）
 - PK: `DATE#<YYYY-MM-DD>` (String)
-- SK: `TIME#<startTime>#<endTime>` (String)
+- SK: `TIME#<startTime>#<endTime>#<bookingId>` (String)
 - 属性:
   - bookingId: String
   - userId: String
   - status: String
   - bookingType: String
+  - keepOrder: Number (キープ順序)
+  - isKeep: Boolean (キープ予約かどうか)
 
 #### 4.2.4 Options テーブル
 - PK: `OPTION#<optionId>` (String)
@@ -199,12 +203,13 @@ RESTful APIとして以下のエンドポイントを実装する。各エンド
 - GET /api/users/:id (管理者向け) - ユーザー情報取得 (ユーザーLambda)
 - GET /api/users (管理者向け) - ユーザー一覧取得 (ユーザーLambda)
 
-### 5.4 予約API
+### 5.4 予約API（キープシステム対応）
 - GET /api/bookings - 予約一覧取得 (予約Lambda)
 - POST /api/bookings - 新規予約申請 (予約Lambda)
 - GET /api/bookings/:id - 予約詳細取得 (予約Lambda)
 - PUT /api/bookings/:id - 予約更新 (予約Lambda)
 - DELETE /api/bookings/:id - 予約キャンセル (予約Lambda)
+- GET /api/bookings/keep-status - キープ状況確認 (予約Lambda)
 - POST /api/bookings/:id/confirm - 仮予約から本予約へ変更 (予約Lambda)
 - POST /api/bookings/:id/approve (管理者向け) - 予約承認 (予約Lambda)
 - POST /api/bookings/:id/reject (管理者向け) - 予約拒否 (予約Lambda)
@@ -267,16 +272,19 @@ RESTful APIとして以下のエンドポイントを実装する。各エンド
 
 ## 7. 主要機能のフロー設計
 
-### 7.1 予約申請フロー
+### 7.1 予約申請フロー（キープシステム対応）
 1. ユーザーがカレンダーから空き日時を選択
-2. 予約タイプ（仮予約/本予約）選択
-3. 利用目的、人数、オプションを入力
-4. 利用規約確認と同意
-5. 予約申請送信 → 予約Lambda実行
-6. DynamoDB更新とSNS通知発行
-7. 管理者へ通知
-8. 管理者が予約を承認/拒否 → 管理Lambda実行
-9. 利用者へSNS通知
+2. キープ状況確認API で予約可能性をチェック
+3. 予約タイプ（仮予約/本予約）選択
+4. 利用目的、人数、オプションを入力
+5. 予約間隔ルール（1時間または30分）のバリデーション
+6. 利用規約確認と同意
+7. 予約申請送信 → 予約Lambda実行
+8. キープ順序の決定（第一予約〜第三キープ）
+9. DynamoDB更新（BookingsとCalendarテーブル）とSNS通知発行
+10. 管理者へ通知（キープ情報含む）
+11. 管理者が予約を承認/拒否 → 管理Lambda実行
+12. 利用者へSNS通知（キープ順序情報含む）
 
 ### 7.2 仮予約から本予約への変更フロー
 1. EventBridgeトリガーによる仮予約期限通知（10日前と8日前）
@@ -285,7 +293,7 @@ RESTful APIとして以下のエンドポイントを実装する。各エンド
 4. 管理者へ通知
 5. 本予約確定通知
 
-### 7.3 予約キャンセルフロー
+### 7.3 予約キャンセルフロー（キープ繰り上がり対応）
 1. ユーザーがキャンセルリクエスト → 予約Lambda実行
 2. キャンセル料率計算処理
    - 仮予約: 0%
@@ -293,7 +301,11 @@ RESTful APIとして以下のエンドポイントを実装する。各エンド
    - 本予約かつ利用3日前〜前日: 80%
    - 本予約かつ利用当日: 100%
 3. ユーザーがキャンセル確定
-4. DynamoDB更新とSNS通知発行
+4. キャンセルされた予約のキープ順序を確認
+5. 後続のキープ予約を自動繰り上がり処理
+6. DynamoDB一括更新（BookingsとCalendarテーブル）
+7. 繰り上がり対象ユーザーへSNS通知発行
+8. 管理者へキャンセル・繰り上がり通知
 
 ### 7.4 仮予約自動キャンセルフロー
 1. EventBridgeによる定期実行（毎日）
@@ -302,12 +314,30 @@ RESTful APIとして以下のエンドポイントを実装する。各エンド
 4. 該当予約をキャンセル処理
 5. DynamoDB更新とSNS通知発行
 
-### 7.5 仮予約競合処理フロー
-1. 本予約申し込み受付 → 予約Lambda実行
-2. 同日時の仮予約検出（DynamoDBクエリ）
-3. 仮予約者へSNS通知
-4. 仮予約者の応答処理（Lambda実行）
-5. 予約状態更新（DynamoDB）
+### 7.5 キープシステム管理フロー
+1. 同一時間帯の予約申請受付 → 予約Lambda実行
+2. 既存予約のキープ状況確認（最大第三キープまで）
+3. キープ順序の自動決定（先着順）
+4. キープ情報を含む予約データ保存
+5. キープ状況をユーザーに通知
+
+### 7.6 業務ルール詳細
+#### 予約時間制限
+- 最小予約時間: 2時間
+- 最大予約時間: 制限なし
+
+#### キープシステム
+- 同一時間帯で最大3件まで予約受付（第一予約、第二キープ、第三キープ）
+- 先着順でキープ順序を決定
+- 上位キープのキャンセル時は自動繰り上がり
+
+#### 予約間隔
+- デフォルト: 1時間間隔
+- 最小: 30分間隔（設定可能）
+
+#### キャンセルポリシー
+- 本予約確定時点からキャンセル料発生
+- 仮予約: キャンセル料なし
 
 ## 8. 非機能要件実現方針
 

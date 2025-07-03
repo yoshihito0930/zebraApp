@@ -51,11 +51,13 @@ function validateBookingRequest(data) {
       errors.push('開始時間は現在時刻より後である必要があります。');
     }
     
-    // 最大予約時間（例：8時間）のチェック
+    // 最小予約時間（2時間）のチェック
     const durationHours = (endTime - startTime) / (1000 * 60 * 60);
-    if (durationHours > 8) {
-      errors.push('予約時間は最大8時間までです。');
+    if (durationHours < 2) {
+      errors.push('予約時間は最低2時間以上必要です。');
     }
+    
+    // 最大予約時間制限なし
   }
 
   // 予約タイプの検証
