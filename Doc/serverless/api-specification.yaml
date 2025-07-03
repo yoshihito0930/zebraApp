@@ -310,6 +310,113 @@ components:
         agreedAt:
           type: string
           format: date-time
+
+    CalendarBooking:
+      type: object
+      description: カレンダー表示用に簡略化された予約情報
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        userName:
+          type: string
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [pending, approved, rejected, cancelled]
+        bookingType:
+          type: string
+          enum: [temporary, confirmed]
+        purpose:
+          type: string
+        photographerName:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    TimeSlot:
+      type: object
+      description: 10分単位の時間枠情報
+      properties:
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [available, temporary_approved, confirmed, temporary_pending, confirmed_pending, occupied]
+          description: |
+            - available: 空き
+            - temporary_approved: 承認済み仮予約
+            - confirmed: 本予約
+            - temporary_pending: 承認待ち仮予約
+            - confirmed_pending: 承認待ち本予約
+            - occupied: その他予約済み
+        booking:
+          $ref: '#/components/schemas/CalendarBooking'
+          nullable: true
+
+    CalendarEvent:
+      type: object
+      description: FullCalendar.js互換のイベントデータ
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+          example: "山田太郎 - 商品撮影"
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        backgroundColor:
+          type: string
+          description: イベントの背景色（Tailwind CSS色コード）
+          example: "#3B82F6"
+        borderColor:
+          type: string
+          description: イベントの枠線色（Tailwind CSS色コード）
+          example: "#2563EB"
+        textColor:
+          type: string
+          description: イベントのテキスト色
+          example: "#FFFFFF"
+        extendedProps:
+          type: object
+          description: 追加のイベント情報
+          properties:
+            userId:
+              type: string
+              format: uuid
+            userName:
+              type: string
+            status:
+              type: string
+              enum: [pending, approved, rejected, cancelled]
+            bookingType:
+              type: string
+              enum: [temporary, confirmed]
+            purpose:
+              type: string
+            photographerName:
+              type: string
+            createdAt:
+              type: string
+              format: date-time
           
 paths:
   /auth/register:
@@ -985,10 +1092,277 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
                 
+  /calendar/month/{year}/{month}:
+    get:
+      summary: 月間カレンダー表示用データ取得
+      description: 指定月の予約統計と日別データを取得します
+      operationId: getMonthlyCalendar
+      tags:
+        - カレンダー
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: year
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 2023
+        - name: month
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+      responses:
+        '200':
+          description: 月間カレンダーデータ取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  year:
+                    type: integer
+                  month:
+                    type: integer
+                  dailyStats:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                        totalBookings:
+                          type: integer
+                        pendingBookings:
+                          type: integer
+                        approvedBookings:
+                          type: integer
+                        temporaryBookings:
+                          type: integer
+                        confirmedBookings:
+                          type: integer
+                  totalBookings:
+                    type: integer
+                  bookings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CalendarBooking'
+        '400':
+          description: バリデーションエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 認証エラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /calendar/week/{year}/{week}:
+    get:
+      summary: 週間カレンダー表示用データ取得
+      description: 指定週の詳細予約情報を取得します
+      operationId: getWeeklyCalendar
+      tags:
+        - カレンダー
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: year
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 2023
+        - name: week
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 53
+      responses:
+        '200':
+          description: 週間カレンダーデータ取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  year:
+                    type: integer
+                  week:
+                    type: integer
+                  startDate:
+                    type: string
+                    format: date
+                  endDate:
+                    type: string
+                    format: date
+                  dailyDetails:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                        timeSlots:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/TimeSlot'
+                        bookings:
+                          type: array
+                          items:
+                            $ref: '#/components/schemas/CalendarBooking'
+                        totalSlots:
+                          type: integer
+                        bookedSlots:
+                          type: integer
+                  totalBookings:
+                    type: integer
+                  bookings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CalendarBooking'
+        '400':
+          description: バリデーションエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 認証エラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /calendar/day/{year}/{month}/{day}:
+    get:
+      summary: 日間カレンダー表示用データ取得
+      description: 指定日の10分単位時間枠別予約状況を取得します
+      operationId: getDailyCalendar
+      tags:
+        - カレンダー
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: year
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 2023
+        - name: month
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+        - name: day
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 31
+      responses:
+        '200':
+          description: 日間カレンダーデータ取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date:
+                    type: string
+                    format: date
+                  timeSlots:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TimeSlot'
+                  bookings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CalendarBooking'
+                  totalSlots:
+                    type: integer
+                  bookedSlots:
+                    type: integer
+        '400':
+          description: バリデーションエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 認証エラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /calendar/events:
+    get:
+      summary: カレンダーイベント形式でのデータ取得
+      description: FullCalendar.js互換のイベントデータを取得します
+      operationId: getCalendarEvents
+      tags:
+        - カレンダー
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: カレンダーイベントデータ取得成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CalendarEvent'
+                  total:
+                    type: integer
+        '400':
+          description: バリデーションエラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: 認証エラー
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /calendar:
     get:
-      summary: 予約カレンダーデータ取得
-      description: 予約カレンダーの表示用データを取得します
+      summary: 予約カレンダーデータ取得（レガシー）
+      description: 予約カレンダーの表示用データを取得します（廃止予定）
       operationId: getCalendarData
       tags:
         - カレンダー

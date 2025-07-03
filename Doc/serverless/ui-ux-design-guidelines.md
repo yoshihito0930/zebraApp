@@ -91,20 +91,180 @@
 - 色分けによる予約状態表示（空き、仮予約、本予約）
 - タッチターゲットは最小44×44ptに設定
 
+**詳細なカレンダー表示機能**:
+
+1. **表示モード**
+   - 月間表示: 日別統計と予約概要表示
+   - 週間表示: 時間枠詳細と日別詳細情報
+   - 日間表示: 10分単位の詳細時間枠管理
+
+2. **色分けシステム**
+   ```jsx
+   const statusColorMap = {
+     // 空き状況
+     available: '#FFFFFF',           // 白 - 空き時間
+     
+     // 仮予約状態
+     temporary_pending: '#F59E0B',   // アンバー - 承認待ち仮予約
+     temporary_approved: '#10B981',  // エメラルド - 承認済み仮予約
+     
+     // 本予約状態
+     confirmed_pending: '#F59E0B',   // アンバー - 承認待ち本予約
+     confirmed: '#3B82F6',           // ブルー - 確定本予約
+     
+     // その他状態
+     cancelled: '#9CA3AF',           // グレー - キャンセル済み
+     rejected: '#EF4444',            // レッド - 拒否済み
+     occupied: '#6B7280'             // ダークグレー - その他占有
+   };
+   ```
+
+3. **FullCalendar.js互換実装**
+   ```jsx
+   // カレンダーイベント形式での表示
+   <FullCalendar
+     plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+     initialView='dayGridMonth'
+     headerToolbar={{
+       left: 'prev,next today',
+       center: 'title',
+       right: 'dayGridMonth,timeGridWeek,timeGridDay'
+     }}
+     events={calendarEvents}
+     eventDidMount={(info) => {
+       // 予約タイプに応じたスタイリング
+       info.el.style.backgroundColor = info.event.backgroundColor;
+       info.el.style.borderColor = info.event.borderColor;
+       info.el.style.color = info.event.textColor;
+     }}
+     eventClick={handleEventClick}
+     dateClick={handleDateClick}
+     loading={handleLoading}
+     eventDisplay='block'
+     displayEventTime={true}
+     eventTimeFormat={{
+       hour: '2-digit',
+       minute: '2-digit',
+       hour12: false
+     }}
+   />
+   ```
+
+4. **API連携パターン**
+   ```jsx
+   // 月間カレンダーデータ取得
+   const useMonthlyCalendar = (year, month) => {
+     return useQuery(
+       ['calendar', 'month', year, month],
+       () => fetchMonthlyCalendar(year, month),
+       {
+         staleTime: 5 * 60 * 1000,
+         cacheTime: 30 * 60 * 1000,
+         onError: handleCalendarError
+       }
+     );
+   };
+
+   // 週間カレンダーデータ取得
+   const useWeeklyCalendar = (year, week) => {
+     return useQuery(
+       ['calendar', 'week', year, week],
+       () => fetchWeeklyCalendar(year, week),
+       {
+         staleTime: 2 * 60 * 1000,
+         cacheTime: 15 * 60 * 1000
+       }
+     );
+   };
+
+   // 日間カレンダーデータ取得
+   const useDailyCalendar = (year, month, day) => {
+     return useQuery(
+       ['calendar', 'day', year, month, day],
+       () => fetchDailyCalendar(year, month, day),
+       {
+         staleTime: 1 * 60 * 1000,
+         cacheTime: 10 * 60 * 1000,
+         refetchInterval: 30 * 1000 // 30秒ごとに更新
+       }
+     );
+   };
+
+   // FullCalendar.js形式のイベントデータ取得
+   const useCalendarEvents = (startDate, endDate) => {
+     return useQuery(
+       ['calendar', 'events', startDate, endDate],
+       () => fetchCalendarEvents(startDate, endDate),
+       {
+         staleTime: 2 * 60 * 1000,
+         select: (data) => data.events // イベント配列のみ抽出
+       }
+     );
+   };
+   ```
+
+5. **レスポンシブ対応**
+   ```jsx
+   // モバイル向けカレンダー実装
+   const MobileCalendarView = () => {
+     const [view, setView] = useState('dayGridMonth');
+     
+     return (
+       <div className="mobile-calendar">
+         <ViewSwitcher
+           options={[
+             { value: 'dayGridMonth', label: '月' },
+             { value: 'timeGridWeek', label: '週' },
+             { value: 'timeGridDay', label: '日' }
+           ]}
+           value={view}
+           onChange={setView}
+         />
+         <FullCalendar
+           plugins={[dayGridPlugin, timeGridPlugin]}
+           initialView={view}
+           height="auto"
+           contentHeight="auto"
+           aspectRatio={0.8}
+           headerToolbar={{
+             left: 'prev,next',
+             center: 'title',
+             right: ''
+           }}
+           events={events}
+           eventDisplay="block"
+           dayMaxEvents={3}
+           moreLinkClick="popover"
+         />
+       </div>
+     );
+   };
+   ```
+
 **実装ガイドライン**:
 ```jsx
-// 月表示コンポーネント例
+// 統合カレンダーコンポーネント例
 <Calendar
   view="month"
+  year={2025}
+  month={1}
   onDateSelect={handleDateSelect}
+  onEventClick={handleEventClick}
   bookings={bookings}
-  statusColorMap={{
-    available: "#FFFFFF",
-    temporary: "#F5E6CC",
-    confirmed: "#82C2A9"
-  }}
+  statusColorMap={statusColorMap}
   loadingPlaceholder={<CalendarSkeleton />}
   errorFallback={<CalendarError onRetry={handleRetry} />}
+  apiEndpoints={{
+    monthly: '/api/calendar/month/{year}/{month}',
+    weekly: '/api/calendar/week/{year}/{week}',
+    daily: '/api/calendar/day/{year}/{month}/{day}',
+    events: '/api/calendar/events'
+  }}
+  permissions={{
+    canViewAll: isAdmin,
+    canEdit: canEditBookings,
+    canCreate: canCreateBookings
+  }}
 />
 ```
 
@@ -112,6 +272,9 @@
 - カレンダーデータを日付範囲で分割取得（Lambda負荷分散）
 - 表示期間外のデータはバックグラウンド事前読み込み
 - 更新が頻繁なデータは部分的更新を実装
+- GSI（DateBookingsIndex）を活用した効率的なデータ取得
+- 10分単位時間枠の動的生成とキャッシュ活用
+- イベント駆動による予約状態のリアルタイム更新
 
 #### 3.1.2 予約フォーム
 
