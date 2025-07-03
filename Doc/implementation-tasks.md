@@ -48,9 +48,9 @@
 - [x] 2.1.8 ユーザー権限管理（一般/管理者）
 
 ### 2.2 予約システム基盤
-- [ ] 2.2.1 DynamoDBテーブル作成（Bookings、Calendar、Options）
-- [ ] 2.2.2 予約Lambda実装（CRUD操作）
-- [ ] 2.2.3 空き状況確認Lambda実装
+- [x] 2.2.1 DynamoDBテーブル作成（Bookings、Calendar、Options）
+- [x] 2.2.2 予約Lambda実装（CRUD操作）
+- [x] 2.2.3 空き状況確認Lambda実装
 - [ ] 2.2.4 予約カレンダーLambda実装
 - [ ] 2.2.5 予約申請フローのビジネスロジック実装
 - [ ] 2.2.6 仮予約・本予約処理ロジック
