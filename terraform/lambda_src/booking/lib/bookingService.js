@@ -9,13 +9,33 @@ const {
   TEMPORARY_BOOKING_DEADLINE_DAYS,
   KEEP_SYSTEM
 } = require('./constants');
+const {
+  validateBookingTypeTransition,
+  validateConfirmationRequirement,
+  validateCancellationEligibility,
+  validateUpdateEligibility
+} = require('./businessRules');
+const {
+  calculateConfirmationDeadline,
+  calculateNotificationSchedule,
+  generateEventBridgeNotificationData,
+  generateEventBridgeAutoCancelData
+} = require('./deadlineService');
 
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
 
 /**
- * キャンセル料率を計算
+ * キャンセル料率を計算（予約タイプ別対応）
+ * @param {string} startTime - 予約開始時間
+ * @param {string} bookingType - 予約タイプ
+ * @returns {number} キャンセル料率（%）
  */
-function calculateCancellationFeePercent(startTime) {
+function calculateCancellationFeePercent(startTime, bookingType = BOOKING_TYPE.CONFIRMED) {
+  // 仮予約の場合は常に0%
+  if (bookingType === BOOKING_TYPE.TEMPORARY) {
+    return 0;
+  }
+
   const now = new Date();
   const bookingDate = new Date(startTime);
   const diffDays = Math.ceil((bookingDate - now) / (1000 * 60 * 60 * 24));
@@ -27,15 +47,56 @@ function calculateCancellationFeePercent(startTime) {
 }
 
 /**
- * 仮予約の確認期限を計算
+ * 仮予約の確認期限を計算（強化版）
+ * @param {string} startTime - 予約開始時間
+ * @param {string} bookingType - 予約タイプ
+ * @returns {Date|null} 確認期限（仮予約以外はnull）
  */
-function calculateConfirmationDeadline(startTime) {
-  const deadlineDate = new Date();
-  deadlineDate.setDate(deadlineDate.getDate() + TEMPORARY_BOOKING_DEADLINE_DAYS);
+function calculateBookingConfirmationDeadline(startTime, bookingType) {
+  if (bookingType !== BOOKING_TYPE.TEMPORARY) {
+    return null;
+  }
   
-  // 予約開始時間より前に期限を設定
-  const bookingStartTime = new Date(startTime);
-  return deadlineDate < bookingStartTime ? deadlineDate : bookingStartTime;
+  return calculateConfirmationDeadline(startTime);
+}
+
+/**
+ * 予約作成時のEventBridge連携準備
+ * @param {Object} bookingData - 予約データ
+ * @returns {Object} EventBridge連携用データ
+ */
+function prepareEventBridgeIntegration(bookingData) {
+  if (bookingData.bookingType !== BOOKING_TYPE.TEMPORARY || !bookingData.confirmationDeadline) {
+    return {
+      hasNotifications: false,
+      events: []
+    };
+  }
+
+  const events = [];
+  const schedule = calculateNotificationSchedule(bookingData.startTime);
+
+  // 通知イベントの準備
+  if (schedule.firstNotification.shouldSend) {
+    events.push(generateEventBridgeNotificationData(bookingData, 'first'));
+  }
+  
+  if (schedule.secondNotification.shouldSend) {
+    events.push(generateEventBridgeNotificationData(bookingData, 'second'));
+  }
+  
+  if (schedule.deadlineNotification.shouldSend) {
+    events.push(generateEventBridgeNotificationData(bookingData, 'deadline'));
+  }
+
+  // 自動キャンセルイベントの準備
+  events.push(generateEventBridgeAutoCancelData(bookingData));
+
+  return {
+    hasNotifications: true,
+    events,
+    schedule
+  };
 }
 
 /**
@@ -113,25 +174,26 @@ function generateAvailableTimeSlots(date) {
 }
 
 /**
- * 予約データをBookingsテーブル用に変換（キープシステム対応）
+ * 予約データをBookingsテーブル用に変換（キープシステム＋期限管理対応）
  */
 function formatBookingForTable(bookingData, userId, userInfo, keepOrder = 1, isKeep = false) {
   const bookingId = uuidv4();
   const now = new Date().toISOString();
   
-  // 確認期限の計算
-  const confirmationDeadline = bookingData.bookingType === BOOKING_TYPE.TEMPORARY
-    ? calculateConfirmationDeadline(bookingData.startTime)
-    : null;
+  // 確認期限の計算（強化版）
+  const confirmationDeadline = calculateBookingConfirmationDeadline(bookingData.startTime, bookingData.bookingType);
 
-  // キャンセル料率の計算
-  const cancellationFeePercent = calculateCancellationFeePercent(bookingData.startTime);
+  // 確認要求チェック
+  const confirmationCheck = validateConfirmationRequirement(bookingData.startTime, bookingData.bookingType);
+
+  // キャンセル料率の計算（予約タイプ別）
+  const cancellationFeePercent = calculateCancellationFeePercent(bookingData.startTime, bookingData.bookingType);
   
   // 日付とソートキー用の値を準備
   const startDate = new Date(bookingData.startTime).toISOString().split('T')[0];
   const startTimeForSort = new Date(bookingData.startTime).toISOString();
   
-  return {
+  const formattedBooking = {
     // プライマリキー
     PK: `BOOKING#${bookingId}`,
     SK: `USER#${userId}`,
@@ -167,15 +229,21 @@ function formatBookingForTable(bookingData, userId, userInfo, keepOrder = 1, isK
     keepOrder: keepOrder,
     isKeep: isKeep,
     
+    // 期限管理関連（強化）
     confirmationDeadline: confirmationDeadline ? confirmationDeadline.toISOString() : null,
+    requiresConfirmation: confirmationCheck.requiresConfirmation,
     automaticCancellation: bookingData.bookingType === BOOKING_TYPE.TEMPORARY,
     cancellationFeePercent,
+    
+    // その他
     options: bookingData.options || [],
     approvedBy: null,
     approvedAt: null,
     createdAt: now,
     updatedAt: now
   };
+
+  return formattedBooking;
 }
 
 /**
@@ -238,7 +306,10 @@ async function getUserInfo(userId) {
 }
 
 /**
- * 予約をトランザクションで作成（BookingsとCalendarテーブルに同時書き込み）
+ * 予約をトランザクションで作成（BookingsとCalendarテーブルに同時書き込み＋EventBridge連携準備）
+ * @param {Object} bookingData - 予約データ
+ * @param {Object} calendarData - カレンダーデータ
+ * @returns {Promise<Object>} 作成結果とEventBridge情報
  */
 async function createBookingTransaction(bookingData, calendarData) {
   const transactParams = {
@@ -261,6 +332,161 @@ async function createBookingTransaction(bookingData, calendarData) {
   };
   
   await dynamoDB.transactWrite(transactParams).promise();
+
+  // EventBridge連携データを準備
+  const eventBridgeData = prepareEventBridgeIntegration(bookingData);
+
+  return {
+    success: true,
+    bookingData,
+    calendarData,
+    eventBridgeData
+  };
+}
+
+/**
+ * 予約タイプ変更の検証と処理
+ * @param {Object} existingBooking - 既存の予約データ
+ * @param {string} newBookingType - 新しい予約タイプ
+ * @returns {Object} 変更可能性とメッセージ
+ */
+function validateAndProcessBookingTypeChange(existingBooking, newBookingType) {
+  const validation = validateBookingTypeTransition(
+    existingBooking.bookingType,
+    newBookingType,
+    existingBooking.status
+  );
+
+  if (!validation.isValid) {
+    return validation;
+  }
+
+  // 本予約への変更の場合、追加処理
+  if (existingBooking.bookingType === BOOKING_TYPE.TEMPORARY && 
+      newBookingType === BOOKING_TYPE.CONFIRMED) {
+    
+    // 確認期限を削除
+    const updatedBooking = {
+      ...existingBooking,
+      bookingType: newBookingType,
+      confirmationDeadline: null,
+      requiresConfirmation: false,
+      automaticCancellation: false,
+      // キャンセル料率を再計算
+      cancellationFeePercent: calculateCancellationFeePercent(existingBooking.startTime, newBookingType),
+      updatedAt: new Date().toISOString()
+    };
+
+    return {
+      isValid: true,
+      message: '仮予約から本予約に変更されました。',
+      updatedBooking
+    };
+  }
+
+  return validation;
+}
+
+/**
+ * 予約キャンセルの検証と処理
+ * @param {Object} existingBooking - 既存の予約データ
+ * @returns {Object} キャンセル可能性と料金情報
+ */
+function validateAndProcessBookingCancellation(existingBooking) {
+  const cancellationCheck = validateCancellationEligibility(
+    existingBooking.startTime,
+    existingBooking.bookingType,
+    existingBooking.status
+  );
+
+  if (!cancellationCheck.canCancel) {
+    return cancellationCheck;
+  }
+
+  const updatedBooking = {
+    ...existingBooking,
+    status: BOOKING_STATUS.CANCELLED,
+    cancellationFeePercent: cancellationCheck.cancellationFeePercent,
+    cancellationReason: '利用者による手動キャンセル',
+    updatedAt: new Date().toISOString()
+  };
+
+  // GSIキーを更新
+  updatedBooking.GSI2PK = `STATUS#${BOOKING_STATUS.CANCELLED}`;
+
+  return {
+    canCancel: true,
+    cancellationFeePercent: cancellationCheck.cancellationFeePercent,
+    message: cancellationCheck.message,
+    updatedBooking
+  };
+}
+
+/**
+ * 予約更新の検証と処理
+ * @param {Object} existingBooking - 既存の予約データ
+ * @param {Object} updateData - 更新データ
+ * @returns {Object} 更新可能性と更新されたデータ
+ */
+function validateAndProcessBookingUpdate(existingBooking, updateData) {
+  const updateCheck = validateUpdateEligibility(
+    existingBooking.bookingType,
+    existingBooking.status,
+    existingBooking.startTime
+  );
+
+  if (!updateCheck.canUpdate) {
+    return updateCheck;
+  }
+
+  // 予約タイプの変更がある場合
+  if (updateData.bookingType && updateData.bookingType !== existingBooking.bookingType) {
+    const typeChangeResult = validateAndProcessBookingTypeChange(existingBooking, updateData.bookingType);
+    
+    if (!typeChangeResult.isValid) {
+      return typeChangeResult;
+    }
+
+    if (typeChangeResult.updatedBooking) {
+      return {
+        canUpdate: true,
+        message: typeChangeResult.message,
+        updatedBooking: {
+          ...typeChangeResult.updatedBooking,
+          ...updateData,
+          updatedAt: new Date().toISOString()
+        }
+      };
+    }
+  }
+
+  // 通常の更新処理
+  const updatedBooking = {
+    ...existingBooking,
+    ...updateData,
+    updatedAt: new Date().toISOString()
+  };
+
+  // 時間が変更された場合、GSIキーを更新
+  if (updateData.startTime) {
+    const startDate = new Date(updateData.startTime).toISOString().split('T')[0];
+    const startTimeForSort = new Date(updateData.startTime).toISOString();
+    updatedBooking.GSI2SK = startTimeForSort;
+    updatedBooking.GSI3PK = `DATE#${startDate}`;
+    updatedBooking.GSI3SK = `TIME#${new Date(updateData.startTime).toISOString().split('T')[1].slice(0, 8)}`;
+    
+    // 確認期限を再計算（仮予約の場合）
+    if (updatedBooking.bookingType === BOOKING_TYPE.TEMPORARY) {
+      const newDeadline = calculateBookingConfirmationDeadline(updateData.startTime, updatedBooking.bookingType);
+      updatedBooking.confirmationDeadline = newDeadline ? newDeadline.toISOString() : null;
+    }
+  }
+
+  return {
+    canUpdate: true,
+    message: null,
+    updatedBooking
+  };
 }
 
 /**
@@ -319,7 +545,7 @@ async function deleteBookingTransaction(bookingPK, bookingSK, calendarPK, calend
 
 module.exports = {
   calculateCancellationFeePercent,
-  calculateConfirmationDeadline,
+  calculateBookingConfirmationDeadline,
   checkTimeSlotAvailability,
   generateAvailableTimeSlots,
   formatBookingForTable,
@@ -328,5 +554,9 @@ module.exports = {
   getUserInfo,
   createBookingTransaction,
   updateBookingTransaction,
-  deleteBookingTransaction
+  deleteBookingTransaction,
+  prepareEventBridgeIntegration,
+  validateAndProcessBookingTypeChange,
+  validateAndProcessBookingCancellation,
+  validateAndProcessBookingUpdate
 };

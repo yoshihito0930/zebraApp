@@ -186,9 +186,10 @@ function validateBookingRequest(bookingData, intervalMinutes = BOOKING_INTERVALS
  * 同一ユーザーの仮予約数制限チェック
  * @param {string} userId - ユーザーID
  * @param {string} bookingType - 予約タイプ
+ * @param {Object} dynamoDB - DynamoDB DocumentClient
  * @returns {Promise<Object>} { isValid: boolean, message: string }
  */
-async function validateUserTemporaryBookingLimit(userId, bookingType) {
+async function validateUserTemporaryBookingLimit(userId, bookingType, dynamoDB) {
   // 仮予約の場合のみチェック
   if (bookingType !== 'temporary') {
     return {
@@ -197,10 +198,232 @@ async function validateUserTemporaryBookingLimit(userId, bookingType) {
     };
   }
   
-  // TODO: 実際の仮予約数を取得してチェック
-  // 現在は制限なしとする
+  try {
+    // ユーザーの現在の仮予約数を取得
+    const params = {
+      TableName: process.env.BOOKINGS_TABLE || 'studio-booking-bookings',
+      IndexName: 'UserBookingsIndex',
+      KeyConditionExpression: 'GSI1PK = :userKey',
+      FilterExpression: 'bookingType = :bookingType AND #status IN (:pending, :approved)',
+      ExpressionAttributeNames: {
+        '#status': 'status'
+      },
+      ExpressionAttributeValues: {
+        ':userKey': `USER#${userId}`,
+        ':bookingType': 'temporary',
+        ':pending': 'pending',
+        ':approved': 'approved'
+      }
+    };
+    
+    const result = await dynamoDB.query(params).promise();
+    
+    // 現在は制限なしとするが、将来的には制限を設けることも可能
+    const MAX_TEMPORARY_BOOKINGS = 10; // 必要に応じて調整
+    
+    if (result.Count >= MAX_TEMPORARY_BOOKINGS) {
+      return {
+        isValid: false,
+        message: `仮予約は最大${MAX_TEMPORARY_BOOKINGS}件まで申請できます。`
+      };
+    }
+    
+    return {
+      isValid: true,
+      message: null
+    };
+  } catch (error) {
+    console.error('仮予約数制限チェックエラー:', error);
+    // エラーの場合は通す（可用性を優先）
+    return {
+      isValid: true,
+      message: null
+    };
+  }
+}
+
+/**
+ * 予約タイプ変更の妥当性チェック
+ * @param {string} currentBookingType - 現在の予約タイプ
+ * @param {string} newBookingType - 新しい予約タイプ
+ * @param {string} currentStatus - 現在の予約ステータス
+ * @returns {Object} { isValid: boolean, message: string }
+ */
+function validateBookingTypeTransition(currentBookingType, newBookingType, currentStatus) {
+  // 同じタイプの場合は問題なし
+  if (currentBookingType === newBookingType) {
+    return {
+      isValid: true,
+      message: null
+    };
+  }
+  
+  // 仮予約から本予約への変更
+  if (currentBookingType === 'temporary' && newBookingType === 'confirmed') {
+    // 承認済みの仮予約のみ本予約に変更可能
+    if (currentStatus !== 'approved') {
+      return {
+        isValid: false,
+        message: '承認済みの仮予約のみ本予約に変更できます。'
+      };
+    }
+    return {
+      isValid: true,
+      message: null
+    };
+  }
+  
+  // 本予約から仮予約への変更は不可
+  if (currentBookingType === 'confirmed' && newBookingType === 'temporary') {
+    return {
+      isValid: false,
+      message: '本予約から仮予約への変更はできません。'
+    };
+  }
+  
+  return {
+    isValid: false,
+    message: '無効な予約タイプの変更です。'
+  };
+}
+
+/**
+ * 仮予約の確認要求チェック
+ * @param {string} startTime - 予約開始時間（ISO形式）
+ * @param {string} bookingType - 予約タイプ
+ * @returns {Object} { isValid: boolean, message: string, requiresConfirmation: boolean }
+ */
+function validateConfirmationRequirement(startTime, bookingType) {
+  if (bookingType !== 'temporary') {
+    return {
+      isValid: true,
+      message: null,
+      requiresConfirmation: false
+    };
+  }
+  
+  const bookingDate = new Date(startTime);
+  const now = new Date();
+  
+  // 7日後の18:00を確認期限とする
+  const confirmationDeadline = new Date(now);
+  confirmationDeadline.setDate(confirmationDeadline.getDate() + 7);
+  confirmationDeadline.setHours(18, 0, 0, 0);
+  
+  // 予約日が確認期限より後の場合は確認が必要
+  if (bookingDate > confirmationDeadline) {
+    return {
+      isValid: true,
+      message: `利用日7日前の18:00までに予約確定の連絡が必要です。期限: ${confirmationDeadline.toLocaleDateString('ja-JP')} 18:00`,
+      requiresConfirmation: true
+    };
+  }
+  
+  // 確認期限内の場合は即座に確定扱い
   return {
     isValid: true,
+    message: '確認期限内のため、即座に確定されます。',
+    requiresConfirmation: false
+  };
+}
+
+/**
+ * キャンセル可能性チェック
+ * @param {string} startTime - 予約開始時間（ISO形式）
+ * @param {string} bookingType - 予約タイプ
+ * @param {string} status - 予約ステータス
+ * @returns {Object} { canCancel: boolean, cancellationFeePercent: number, message: string }
+ */
+function validateCancellationEligibility(startTime, bookingType, status) {
+  // キャンセル済みや拒否済みの予約はキャンセル不可
+  if (status === 'cancelled' || status === 'rejected') {
+    return {
+      canCancel: false,
+      cancellationFeePercent: 0,
+      message: 'この予約はキャンセルできません。'
+    };
+  }
+  
+  const now = new Date();
+  const bookingDate = new Date(startTime);
+  const diffDays = Math.ceil((bookingDate - now) / (1000 * 60 * 60 * 24));
+  
+  // 仮予約の場合はキャンセル料なし
+  if (bookingType === 'temporary') {
+    return {
+      canCancel: true,
+      cancellationFeePercent: 0,
+      message: '仮予約のためキャンセル料は発生しません。'
+    };
+  }
+  
+  // 本予約の場合はキャンセル料を計算
+  let cancellationFeePercent = 0;
+  let message = '';
+  
+  if (diffDays >= 6) {
+    cancellationFeePercent = 0;
+    message = 'キャンセル料は発生しません。';
+  } else if (diffDays >= 4) {
+    cancellationFeePercent = 50;
+    message = 'キャンセル料として予約時間分の利用料の50%が発生します。';
+  } else if (diffDays >= 1) {
+    cancellationFeePercent = 80;
+    message = 'キャンセル料として予約時間分の利用料の80%が発生します。';
+  } else {
+    cancellationFeePercent = 100;
+    message = 'キャンセル料として予約時間分の利用料の100%が発生します。';
+  }
+  
+  return {
+    canCancel: true,
+    cancellationFeePercent,
+    message
+  };
+}
+
+/**
+ * 予約変更可能性チェック
+ * @param {string} bookingType - 予約タイプ
+ * @param {string} status - 予約ステータス
+ * @param {string} startTime - 予約開始時間（ISO形式）
+ * @returns {Object} { canUpdate: boolean, message: string }
+ */
+function validateUpdateEligibility(bookingType, status, startTime) {
+  // キャンセル済みや拒否済みの予約は変更不可
+  if (status === 'cancelled' || status === 'rejected') {
+    return {
+      canUpdate: false,
+      message: 'キャンセル済みまたは拒否済みの予約は変更できません。'
+    };
+  }
+  
+  const now = new Date();
+  const bookingDate = new Date(startTime);
+  
+  // 過去の予約は変更不可
+  if (bookingDate <= now) {
+    return {
+      canUpdate: false,
+      message: '過去の予約は変更できません。'
+    };
+  }
+  
+  // 本予約で承認済みの場合は制限あり
+  if (bookingType === 'confirmed' && status === 'approved') {
+    const diffHours = (bookingDate - now) / (1000 * 60 * 60);
+    
+    // 24時間前からは変更不可
+    if (diffHours < 24) {
+      return {
+        canUpdate: false,
+        message: '本予約は利用開始24時間前からは変更できません。'
+      };
+    }
+  }
+  
+  return {
+    canUpdate: true,
     message: null
   };
 }
@@ -230,5 +453,9 @@ module.exports = {
   validateBookingDate,
   validateBookingRequest,
   validateUserTemporaryBookingLimit,
+  validateBookingTypeTransition,
+  validateConfirmationRequirement,
+  validateCancellationEligibility,
+  validateUpdateEligibility,
   validateHolidays
 };
