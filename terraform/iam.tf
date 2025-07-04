@@ -87,3 +87,118 @@ resource "aws_iam_role_policy_attachment" "eventbridge_scheduler_lambda" {
   role       = aws_iam_role.lambda_exec.name
   policy_arn = aws_iam_policy.eventbridge_scheduler_invoke_lambda.arn
 }
+
+# ------------------------------------------------------------------------------
+# IAM Policy for DynamoDB Stream Processing
+# ------------------------------------------------------------------------------
+resource "aws_iam_policy" "dynamodb_stream_processing" {
+  name        = "zebra-app-dynamodb-stream-processing-policy"
+  description = "IAM policy for DynamoDB stream processing and table access"
+  policy      = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:DescribeStream",
+          "dynamodb:GetRecords",
+          "dynamodb:GetShardIterator",
+          "dynamodb:ListStreams"
+        ]
+        Resource = [
+          aws_dynamodb_table.bookings.stream_arn
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ]
+        Resource = [
+          aws_dynamodb_table.bookings.arn,
+          aws_dynamodb_table.notifications.arn,
+          aws_dynamodb_table.calendar.arn,
+          aws_dynamodb_table.options.arn,
+          aws_dynamodb_table.users.arn,
+          "${aws_dynamodb_table.bookings.arn}/index/*",
+          "${aws_dynamodb_table.notifications.arn}/index/*",
+          "${aws_dynamodb_table.calendar.arn}/index/*",
+          "${aws_dynamodb_table.options.arn}/index/*",
+          "${aws_dynamodb_table.users.arn}/index/*"
+        ]
+      }
+    ]
+  })
+}
+
+# ------------------------------------------------------------------------------
+# IAM Policy for EventBridge Publishing
+# ------------------------------------------------------------------------------
+resource "aws_iam_policy" "eventbridge_publishing" {
+  name        = "zebra-app-eventbridge-publishing-policy"
+  description = "IAM policy for publishing events to EventBridge"
+  policy      = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "events:PutEvents"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# ------------------------------------------------------------------------------
+# IAM Policy for SQS Dead Letter Queue
+# ------------------------------------------------------------------------------
+resource "aws_iam_policy" "sqs_dlq_access" {
+  name        = "zebra-app-sqs-dlq-access-policy"
+  description = "IAM policy for SQS dead letter queue access"
+  policy      = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:SendMessage",
+          "sqs:GetQueueAttributes"
+        ]
+        Resource = [
+          aws_sqs_queue.stream_processor_dlq.arn
+        ]
+      }
+    ]
+  })
+}
+
+# ------------------------------------------------------------------------------
+# Attach DynamoDB Stream Processing Policy to Lambda Role
+# ------------------------------------------------------------------------------
+resource "aws_iam_role_policy_attachment" "lambda_dynamodb_stream" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = aws_iam_policy.dynamodb_stream_processing.arn
+}
+
+# ------------------------------------------------------------------------------
+# Attach EventBridge Publishing Policy to Lambda Role
+# ------------------------------------------------------------------------------
+resource "aws_iam_role_policy_attachment" "lambda_eventbridge_publishing" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = aws_iam_policy.eventbridge_publishing.arn
+}
+
+# ------------------------------------------------------------------------------
+# Attach SQS DLQ Access Policy to Lambda Role
+# ------------------------------------------------------------------------------
+resource "aws_iam_role_policy_attachment" "lambda_sqs_dlq" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = aws_iam_policy.sqs_dlq_access.arn
+}
