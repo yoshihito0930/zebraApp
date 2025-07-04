@@ -30,6 +30,12 @@ const CANCELLATION_FEE_RATES = {
   SAME_DAY: 100           // 当日: 100%
 };
 
+// 料金設定
+const PRICING = {
+  HOURLY_RATE: 5000,      // 1時間あたりの基本料金（円）
+  MINIMUM_HOURS: 2        // 最低利用時間（時間）
+};
+
 // 営業時間設定
 const BUSINESS_HOURS = {
   START: 0,  // 0:00 (24時間営業)
@@ -88,6 +94,7 @@ module.exports = {
   BOOKING_STATUS,
   BOOKING_TYPE,
   CANCELLATION_FEE_RATES,
+  PRICING,
   BUSINESS_HOURS,
   TEMPORARY_BOOKING_DEADLINE_DAYS,
   KEEP_SYSTEM,

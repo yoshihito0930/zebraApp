@@ -5,6 +5,7 @@ const {
   BOOKING_STATUS,
   BOOKING_TYPE,
   CANCELLATION_FEE_RATES,
+  PRICING,
   BUSINESS_HOURS,
   TEMPORARY_BOOKING_DEADLINE_DAYS,
   KEEP_SYSTEM
@@ -23,6 +24,23 @@ const {
 } = require('./deadlineService');
 
 const dynamoDB = new AWS.DynamoDB.DocumentClient();
+
+/**
+ * 基本料金を計算
+ * @param {string} startTime - 予約開始時間（ISO形式）
+ * @param {string} endTime - 予約終了時間（ISO形式）
+ * @returns {number} 基本料金（円）
+ */
+function calculateBasePrice(startTime, endTime) {
+  const start = new Date(startTime);
+  const end = new Date(endTime);
+  const durationHours = (end - start) / (1000 * 60 * 60);
+  
+  // 最低利用時間の適用
+  const billingHours = Math.max(durationHours, PRICING.MINIMUM_HOURS);
+  
+  return Math.floor(billingHours * PRICING.HOURLY_RATE);
+}
 
 /**
  * キャンセル料率を計算（予約タイプ別対応）
@@ -44,6 +62,18 @@ function calculateCancellationFeePercent(startTime, bookingType = BOOKING_TYPE.C
   if (diffDays >= 4) return CANCELLATION_FEE_RATES.BETWEEN_4_TO_6_DAYS;
   if (diffDays >= 1) return CANCELLATION_FEE_RATES.BETWEEN_1_TO_3_DAYS;
   return CANCELLATION_FEE_RATES.SAME_DAY;
+}
+
+/**
+ * キャンセル料金を計算（基本料金×キャンセル料率のみ）
+ * @param {Object} booking - 予約データ
+ * @returns {number} キャンセル料金（円）
+ */
+function calculateCancellationFee(booking) {
+  const basePrice = calculateBasePrice(booking.startTime, booking.endTime);
+  const feePercent = calculateCancellationFeePercent(booking.startTime, booking.bookingType);
+  
+  return Math.floor(basePrice * (feePercent / 100));
 }
 
 /**
@@ -403,10 +433,16 @@ function validateAndProcessBookingCancellation(existingBooking) {
     return cancellationCheck;
   }
 
+  // 実際のキャンセル料金を計算
+  const basePrice = calculateBasePrice(existingBooking.startTime, existingBooking.endTime);
+  const cancellationFee = calculateCancellationFee(existingBooking);
+
   const updatedBooking = {
     ...existingBooking,
     status: BOOKING_STATUS.CANCELLED,
     cancellationFeePercent: cancellationCheck.cancellationFeePercent,
+    cancellationFee: cancellationFee,
+    basePrice: basePrice,
     cancellationReason: '利用者による手動キャンセル',
     updatedAt: new Date().toISOString()
   };
@@ -417,6 +453,8 @@ function validateAndProcessBookingCancellation(existingBooking) {
   return {
     canCancel: true,
     cancellationFeePercent: cancellationCheck.cancellationFeePercent,
+    cancellationFee: cancellationFee,
+    basePrice: basePrice,
     message: cancellationCheck.message,
     updatedBooking
   };
@@ -544,7 +582,9 @@ async function deleteBookingTransaction(bookingPK, bookingSK, calendarPK, calend
 }
 
 module.exports = {
+  calculateBasePrice,
   calculateCancellationFeePercent,
+  calculateCancellationFee,
   calculateBookingConfirmationDeadline,
   checkTimeSlotAvailability,
   generateAvailableTimeSlots,
