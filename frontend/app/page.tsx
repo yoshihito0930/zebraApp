@@ -19,8 +19,12 @@ export default function Home() {
           </p>
           
           <div className="mt-8 flex flex-col md:flex-row gap-4 justify-center">
-            <button className="btn-primary">ログイン</button>
-            <button className="btn-secondary">新規登録</button>
+            <Link href="/calendar" className="btn-primary text-center">
+              カレンダーを見る
+            </Link>
+            <Link href="/login" className="btn-secondary text-center">
+              ログイン
+            </Link>
           </div>
         </div>
         
