@@ -187,13 +187,14 @@ const Calendar: React.FC<CalendarProps> = ({
             hour12: false
           }}
           dayHeaderFormat={{
-            weekday: 'short',
-            month: 'numeric',
-            day: 'numeric'
+            weekday: 'short'
           }}
           titleFormat={{
             year: 'numeric',
             month: 'long'
+          }}
+          dayCellContent={(arg) => {
+            return arg.date.getDate().toString();
           }}
         />
       </div>
