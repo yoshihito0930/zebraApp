@@ -5,13 +5,8 @@ go 1.23.0
 toolchain go1.24.1
 
 require (
-	github.com/go-redis/redis/v8 v8.11.5
-	github.com/golang-jwt/jwt/v5 v5.0.0
-	github.com/golang-migrate/migrate/v4 v4.16.2
 	github.com/google/uuid v1.4.0
 	github.com/labstack/echo/v4 v4.13.4
-	gorm.io/driver/postgres v1.5.4
-	gorm.io/gorm v1.25.5
 )
 
 require (

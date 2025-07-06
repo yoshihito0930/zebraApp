@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 )
@@ -11,11 +12,12 @@ type Config struct {
 	ServerPort string
 
 	// データベース設定
-	DBHost     string
-	DBPort     int
-	DBUser     string
-	DBPassword string
-	DBName     string
+	DBHost      string
+	DBPort      int
+	DBUser      string
+	DBPassword  string
+	DBName      string
+	DatabaseURL string
 
 	// Redis設定
 	RedisHost string
@@ -47,6 +49,11 @@ func LoadConfig() (*Config, error) {
 
 	// JWT設定
 	cfg.JWTSecret = getEnv("JWT_SECRET", "devjwtsecretkey")
+
+	// データベースURL組み立て
+	cfg.DatabaseURL = getEnv("DATABASE_URL",
+		fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
+			cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBName))
 
 	return cfg, nil
 }

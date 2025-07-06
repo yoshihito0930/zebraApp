@@ -9,7 +9,7 @@ import jaLocale from '@fullcalendar/core/locales/ja';
 import { EventClickArg, DateSelectArg, EventInput, Calendar as FullCalendarType } from '@fullcalendar/core';
 import CalendarToolbar from './CalendarToolbar';
 import CalendarEventModal from './CalendarEventModal';
-import { CalendarEvent } from './calendar-utils';
+import { CalendarEvent, CalendarApiResponse, AvailabilitySlot, formatAvailabilityAsEvents } from './calendar-utils';
 
 interface CalendarProps {
   className?: string;
@@ -32,6 +32,8 @@ const Calendar: React.FC<CalendarProps> = ({
   editable = false
 }) => {
   const [events, setEvents] = useState<EventInput[]>([]);
+  const [availability, setAvailability] = useState<AvailabilitySlot[]>([]);
+  const [showAvailability, setShowAvailability] = useState(true);
   const [loading, setLoading] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);

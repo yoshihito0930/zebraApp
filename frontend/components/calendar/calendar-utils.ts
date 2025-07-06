@@ -32,6 +32,18 @@ export interface CalendarEvent {
   };
 }
 
+export interface AvailabilitySlot {
+  start: string;
+  end: string;
+  available: boolean;
+  type: string; // 'business_hours', 'break', 'blocked'
+}
+
+export interface CalendarApiResponse {
+  events: CalendarEvent[];
+  availability: AvailabilitySlot[];
+}
+
 // 予約ステータスとタイプに基づいてイベントの色を決定
 export function getEventColor(status: string, bookingType: string): {
   backgroundColor: string;
@@ -176,4 +188,90 @@ export function getContrastColor(hexColor: string): string {
   const brightness = (r * 299 + g * 587 + b * 114) / 1000;
   
   return brightness > 155 ? '#000000' : '#FFFFFF';
+}
+
+// 空き状況をFullCalendarイベント形式に変換
+export function formatAvailabilityAsEvents(availability: AvailabilitySlot[]): CalendarEvent[] {
+  return availability.map((slot, index) => {
+    const colors = getAvailabilityColor(slot.available, slot.type);
+    
+    return {
+      id: `availability-${index}`,
+      title: slot.available ? '空き' : '予約済み',
+      start: slot.start,
+      end: slot.end,
+      backgroundColor: colors.backgroundColor,
+      borderColor: colors.borderColor,
+      textColor: colors.textColor,
+      extendedProps: {
+        userId: '',
+        userName: '',
+        status: slot.available ? 'available' : 'occupied',
+        bookingType: 'availability',
+        purpose: slot.type,
+        photographerName: '',
+        createdAt: '',
+        isAvailabilitySlot: true,
+        availabilityType: slot.type
+      }
+    };
+  });
+}
+
+// 空き状況の色を決定
+export function getAvailabilityColor(available: boolean, type: string): {
+  backgroundColor: string;
+  borderColor: string;
+  textColor: string;
+} {
+  let backgroundColor: string;
+  let borderColor: string;
+  const textColor = '#374151'; // gray-700
+
+  if (type === 'business_hours') {
+    if (available) {
+      backgroundColor = '#DCFCE7'; // green-100
+      borderColor = '#BBF7D0'; // green-200
+    } else {
+      backgroundColor = '#FEE2E2'; // red-100
+      borderColor = '#FECACA'; // red-200
+    }
+  } else {
+    // 営業時間外や休憩時間
+    backgroundColor = '#F3F4F6'; // gray-100
+    borderColor = '#E5E7EB'; // gray-200
+  }
+
+  return { backgroundColor, borderColor, textColor };
+}
+
+// 時間スロットの重複チェック
+export function isTimeSlotAvailable(
+  startTime: Date,
+  endTime: Date,
+  availability: AvailabilitySlot[]
+): boolean {
+  const start = startTime.toISOString();
+  const end = endTime.toISOString();
+  
+  for (const slot of availability) {
+    const slotStart = new Date(slot.start);
+    const slotEnd = new Date(slot.end);
+    
+    // 時間枠が重複し、かつ利用可能でない場合
+    if (start < slot.end && end > slot.start && !slot.available) {
+      return false;
+    }
+  }
+  
+  return true;
+}
+
+// 営業時間チェック
+export function isBusinessHours(dateTime: Date): boolean {
+  const day = dateTime.getDay(); // 0=日曜日, 6=土曜日
+  const hour = dateTime.getHours();
+  
+  // 平日（月-金）の9:00-22:00のみ営業
+  return day >= 1 && day <= 5 && hour >= 9 && hour < 22;
 }
