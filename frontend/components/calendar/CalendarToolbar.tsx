@@ -6,19 +6,25 @@ import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
 interface CalendarToolbarProps {
   currentView: string;
   currentDate: Date;
+  weekStart?: Date | null;
+  weekEnd?: Date | null;
   onViewChange: (view: string) => void;
   onPrev: () => void;
   onNext: () => void;
   onToday: () => void;
+  loading?: boolean;
 }
 
 const CalendarToolbar: React.FC<CalendarToolbarProps> = ({
   currentView,
   currentDate,
+  weekStart,
+  weekEnd,
   onViewChange,
   onPrev,
   onNext,
-  onToday
+  onToday,
+  loading = false
 }) => {
   const formatTitle = () => {
     const year = currentDate.getFullYear();
@@ -28,13 +34,34 @@ const CalendarToolbar: React.FC<CalendarToolbarProps> = ({
       case 'dayGridMonth':
         return `${year}年${month}月`;
       case 'timeGridWeek':
-        return `${year}年${month}月 (週間表示)`;
+        // 週間表示で週の開始日と終了日の情報がある場合
+        if (weekStart && weekEnd) {
+          const startYear = weekStart.getFullYear();
+          const startMonth = weekStart.getMonth() + 1;
+          const endYear = weekEnd.getFullYear();
+          const endMonth = weekEnd.getMonth() + 1;
+          
+          // 同じ年の同じ月の場合
+          if (startYear === endYear && startMonth === endMonth) {
+            return `${startYear}年${startMonth}月`;
+          }
+          // 同じ年で異なる月の場合
+          else if (startYear === endYear) {
+            return `${startYear}年${startMonth}月～${endMonth}月`;
+          }
+          // 異なる年の場合
+          else {
+            return `${startYear}年${startMonth}月～${endYear}年${endMonth}月`;
+          }
+        }
+        // フォールバック（週の情報がない場合）
+        return `${year}年${month}月`;
       case 'timeGridDay':
         return currentDate.toLocaleDateString('ja-JP', {
           year: 'numeric',
           month: 'long',
           day: 'numeric',
-          weekday: 'long'
+          weekday: 'short'
         });
       default:
         return `${year}年${month}月`;

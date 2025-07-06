@@ -37,6 +37,8 @@ const Calendar: React.FC<CalendarProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentView, setCurrentView] = useState(initialView);
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [weekStart, setWeekStart] = useState<Date | null>(null);
+  const [weekEnd, setWeekEnd] = useState<Date | null>(null);
   const calendarRef = useRef<FullCalendar>(null);
 
   // APIからイベントデータを取得
@@ -100,11 +102,28 @@ const Calendar: React.FC<CalendarProps> = ({
 
   const handleDatesSet = (dateInfo: any) => {
     setCurrentDate(dateInfo.view.currentStart);
+    // ビューが変更された場合、状態を同期
+    setCurrentView(dateInfo.view.type);
+    
+    // 週間表示の場合、週の開始日と終了日を保存
+    if (dateInfo.view.type === 'timeGridWeek') {
+      setWeekStart(dateInfo.view.activeStart);
+      setWeekEnd(new Date(dateInfo.view.activeEnd.getTime() - 1)); // 終了日から1ミリ秒引く（翌日の0時を避けるため）
+    } else {
+      setWeekStart(null);
+      setWeekEnd(null);
+    }
+    
     fetchEvents(dateInfo.view.activeStart, dateInfo.view.activeEnd);
   };
 
   const handleViewChange = (view: string) => {
-    setCurrentView(view as any);
+    const calendarApi = calendarRef.current?.getApi();
+    if (calendarApi) {
+      // FullCalendarのビューを実際に変更
+      calendarApi.changeView(view);
+      setCurrentView(view as any);
+    }
   };
 
   const handlePrev = () => {
@@ -128,16 +147,31 @@ const Calendar: React.FC<CalendarProps> = ({
     }
   };
 
+  // ビューに応じたdayHeaderFormatを取得
+  const getDayHeaderFormat = () => {
+    switch (currentView) {
+      case 'timeGridWeek':
+        return { weekday: 'short' as const, day: 'numeric' as const }; // 例：「月 1」
+      case 'timeGridDay':
+        return { weekday: 'short' as const }; // CSSで非表示にする
+      default:
+        return { weekday: 'short' as const };
+    }
+  };
+
   return (
     <div className={`calendar-container ${className}`}>
       {showToolbar && (
         <CalendarToolbar
           currentView={currentView}
           currentDate={currentDate}
+          weekStart={weekStart}
+          weekEnd={weekEnd}
           onViewChange={handleViewChange}
           onPrev={handlePrev}
           onNext={handleNext}
           onToday={handleToday}
+          loading={loading}
         />
       )}
 
@@ -149,6 +183,7 @@ const Calendar: React.FC<CalendarProps> = ({
         )}
 
         <FullCalendar
+          key={currentView} // ビューが変更されたときに再レンダリング
           ref={calendarRef}
           plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
           initialView={currentView}
@@ -186,14 +221,16 @@ const Calendar: React.FC<CalendarProps> = ({
             minute: '2-digit',
             hour12: false
           }}
-          dayHeaderFormat={{
-            weekday: 'short'
-          }}
+          dayHeaderFormat={getDayHeaderFormat()}
           titleFormat={{
             year: 'numeric',
             month: 'long'
           }}
           dayCellContent={(arg) => {
+            // 日間表示では日付数字を表示しない
+            if (currentView === 'timeGridDay') {
+              return null;
+            }
             return arg.date.getDate().toString();
           }}
         />
@@ -255,6 +292,37 @@ const Calendar: React.FC<CalendarProps> = ({
           border-color: var(--accent-color);
         }
         
+        /* 日間表示でのヘッダー非表示 */
+        .fc-timegrid-day-view .fc-col-header {
+          display: none;
+        }
+        
+        /* 日間表示での不要な要素を非表示 */
+        .fc-timegrid-day-view .fc-daygrid-day-number {
+          display: none;
+        }
+        
+        /* 週間表示での日付表示改善 */
+        .fc-timegrid-week-view .fc-col-header-cell {
+          padding: 8px 4px;
+          text-align: center;
+          font-weight: 600;
+        }
+        
+        .fc-timegrid-week-view .fc-col-header-cell-cushion {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 2px;
+        }
+        
+        /* 週間表示で日付を大きく表示 */
+        .fc-timegrid-week-view .fc-daygrid-day-number {
+          font-size: 1.1rem;
+          font-weight: 600;
+          color: #374151;
+        }
+        
         @media (max-width: 768px) {
           .fc-custom .fc-toolbar-title {
             font-size: 1.1rem;
@@ -262,6 +330,14 @@ const Calendar: React.FC<CalendarProps> = ({
           
           .fc-custom .fc-daygrid-event {
             font-size: 0.7rem;
+          }
+          
+          .fc-timegrid-week-view .fc-col-header-cell {
+            padding: 6px 2px;
+          }
+          
+          .fc-timegrid-week-view .fc-daygrid-day-number {
+            font-size: 1rem;
           }
         }
       `}</style>
