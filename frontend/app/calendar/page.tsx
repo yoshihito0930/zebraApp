@@ -1,16 +1,109 @@
 "use client";
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Calendar } from '../../components/calendar';
+import { BookingFormModal } from '../../components/booking';
+import { BookingFormData, BookingSubmissionResponse } from '../../types/booking';
 
 export default function CalendarPage() {
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  const [selectedStartTime, setSelectedStartTime] = useState<Date | null>(null);
+  const [selectedEndTime, setSelectedEndTime] = useState<Date | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleDateSelect = (start: Date, end: Date) => {
     console.log('Date selected:', { start, end });
-    // TODO: 予約フォームへのナビゲーション
+    
+    let adjustedStart = start;
+    let adjustedEnd = end;
+    
+    // Check if this is a full-day selection (typical for monthly view)
+    const isFullDaySelection = 
+      start.getHours() === 0 && start.getMinutes() === 0 && 
+      end.getHours() === 0 && end.getMinutes() === 0 &&
+      (end.getTime() - start.getTime()) >= (24 * 60 * 60 * 1000 - 1);
+    
+    if (isFullDaySelection) {
+      // For monthly view selections, set default business hours
+      adjustedStart = new Date(start);
+      adjustedStart.setHours(9, 0, 0, 0); // Default start: 9:00 AM
+      
+      adjustedEnd = new Date(start);
+      adjustedEnd.setHours(11, 0, 0, 0); // Default end: 11:00 AM (2 hours)
+    } else {
+      // For time-based selections (week/day view), ensure minimum duration
+      const minDuration = 2 * 60 * 60 * 1000; // 2 hours in milliseconds
+      const selectedDuration = end.getTime() - start.getTime();
+      
+      if (selectedDuration < minDuration) {
+        adjustedEnd = new Date(start.getTime() + minDuration);
+      }
+    }
+    
+    setSelectedStartTime(adjustedStart);
+    setSelectedEndTime(adjustedEnd);
+    setIsBookingModalOpen(true);
   };
 
   const handleEventClick = (eventInfo: any) => {
     console.log('Event clicked:', eventInfo);
+  };
+
+  const handleBookingSubmit = async (formData: BookingFormData): Promise<BookingSubmissionResponse> => {
+    setIsSubmitting(true);
+    
+    try {
+      const response = await fetch('/api/bookings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify(formData)
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        // Success - close modal and refresh calendar
+        setIsBookingModalOpen(false);
+        
+        // Show success message
+        alert(`予約申請が完了しました。${data.keepPosition ? `第${data.keepPosition}キープとして` : ''}受付いたします。`);
+        
+        // Refresh the calendar to show the new booking
+        window.location.reload();
+        
+        return {
+          success: true,
+          bookingId: data.bookingId,
+          keepPosition: data.keepPosition,
+          message: data.message
+        };
+      } else {
+        return {
+          success: false,
+          message: data.message || '予約申請に失敗しました',
+          errors: data.errors
+        };
+      }
+    } catch (error) {
+      console.error('Booking submission error:', error);
+      return {
+        success: false,
+        message: 'ネットワークエラーが発生しました'
+      };
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const closeBookingModal = () => {
+    if (!isSubmitting) {
+      setIsBookingModalOpen(false);
+      setSelectedStartTime(null);
+      setSelectedEndTime(null);
+    }
   };
 
   return (
@@ -81,12 +174,24 @@ export default function CalendarPage() {
               新規予約を申請する
             </h3>
             <ul className="space-y-2 text-sm text-gray-600">
-              <li>• 空いている日時をクリック</li>
-              <li>• 予約フォームから申請を送信</li>
+              <li>• 空いている日時をドラッグして選択</li>
+              <li>• 予約フォームが自動で開きます</li>
               <li>• 仮予約または本予約を選択可能</li>
+              <li>• 最低2時間からご利用いただけます</li>
+              <li>• 営業時間：平日9:00-22:00</li>
             </ul>
           </div>
         </div>
+
+        {/* Booking Form Modal */}
+        <BookingFormModal
+          isOpen={isBookingModalOpen}
+          selectedStartTime={selectedStartTime}
+          selectedEndTime={selectedEndTime}
+          onClose={closeBookingModal}
+          onSubmit={handleBookingSubmit}
+          isLoading={isSubmitting}
+        />
       </div>
     </div>
   );
