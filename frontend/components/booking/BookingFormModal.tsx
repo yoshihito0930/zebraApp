@@ -61,7 +61,7 @@ const BookingFormModal: React.FC<BookingFormModalProps> = ({
         <div className="flex items-center justify-between p-6 border-b border-gray-200 sticky top-0 bg-white rounded-t-lg">
           <div>
             <h2 className="text-xl font-semibold text-gray-800">
-              スタジオ予約申請
+              スタジオゼブラ予約申請
             </h2>
             <p className="text-sm text-gray-600 mt-1">
               以下の情報を入力して予約を申請してください

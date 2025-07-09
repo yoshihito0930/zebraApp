@@ -72,7 +72,6 @@ export const BOOKING_TYPES = {
     description: '利用7日前18:00までに本予約への変更が必要',
     benefits: [
       'キャンセル料なし',
-      '申請後すぐに回答',
       '本予約への変更可能'
     ],
     limitations: [
@@ -86,12 +85,11 @@ export const BOOKING_TYPES = {
     benefits: [
       '即座に確定',
       '期限なし',
-      '優先的に予約確保'
     ],
     limitations: [
       'キャンセル料適用',
-      '6-4日前: 50%',
-      '3-1日前: 80%',
+      '～4日前: 50%',
+      '3～1日前: 80%',
       '当日: 100%'
     ]
   }
