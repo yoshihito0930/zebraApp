@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { formatDateTime, formatTimeRange } from '../calendar/calendar-utils';
 import BookingTypeSelector from './BookingTypeSelector';
+import BookingOptionsSelector from './BookingOptionsSelector';
 import Button from '../ui/button';
 import Input from '../ui/input';
 import Select from '../ui/select';
@@ -15,7 +16,8 @@ import {
   BOOKING_CONSTANTS,
   PURPOSE_OPTIONS,
   USER_COUNT_OPTIONS,
-  HORIZON_PROTECTION_OPTIONS
+  HORIZON_PROTECTION_OPTIONS,
+  SelectedOption
 } from '../../types/booking';
 
 interface BookingFormProps {
@@ -88,7 +90,8 @@ const BookingForm: React.FC<BookingFormProps> = ({
     contactName: '',
     contactEmail: '',
     contactPhone: '',
-    agreeToTerms: false
+    agreeToTerms: false,
+    selectedOptions: []
   });
 
   const [errors, setErrors] = useState<BookingFormErrors>({});
@@ -453,6 +456,12 @@ const BookingForm: React.FC<BookingFormProps> = ({
           />
         </div>
       </div>
+
+      {/* Options Selection */}
+      <BookingOptionsSelector
+        selectedOptions={formData.selectedOptions || []}
+        onOptionsChange={(options) => updateFormData('selectedOptions', options)}
+      />
 
       {/* Special Requests */}
       <Textarea

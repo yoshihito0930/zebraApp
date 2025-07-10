@@ -1,3 +1,20 @@
+// Booking option types
+export interface BookingOption {
+  id: string;
+  name: string;
+  priceExcludingTax: number;
+  priceIncludingTax: number;
+  unit: string;
+  maxQuantity?: number;
+  variants?: Array<{ id: string; name: string }>;
+}
+
+export interface SelectedOption {
+  optionId: string;
+  quantity: number;
+  variantId?: string;
+}
+
 // Booking form data types
 export interface BookingFormData {
   startTime: string;
@@ -13,6 +30,7 @@ export interface BookingFormData {
   contactEmail: string;
   contactPhone: string;
   agreeToTerms: boolean;
+  selectedOptions?: SelectedOption[];
 }
 
 export interface BookingFormErrors {
@@ -125,4 +143,79 @@ export const USER_COUNT_OPTIONS = [
 export const HORIZON_PROTECTION_OPTIONS = [
   { value: 'yes', label: 'あり' },
   { value: 'no', label: 'なし' }
+];
+
+// Available booking options
+export const AVAILABLE_BOOKING_OPTIONS: BookingOption[] = [
+  {
+    id: 'led-light',
+    name: 'LEDライト',
+    priceExcludingTax: 1000,
+    priceIncludingTax: 1100,
+    unit: '灯',
+    maxQuantity: 10
+  },
+  {
+    id: 'background-paper',
+    name: '背景紙(2.72m)',
+    priceExcludingTax: 2300,
+    priceIncludingTax: 2530,
+    unit: 'm',
+    maxQuantity: 20,
+    variants: [
+      { id: 'black', name: '黒' },
+      { id: 'dove grey', name: 'ダブグレー' },
+      { id: 'pale blue', name: 'ペールブルー' },
+      { id: 'wheat', name: 'ウィート' },
+      { id: 'apple green', name: 'アップルグリーン' },
+      { id: 'canary', name: 'カナリー' },
+      { id: 'red', name: 'レッド' },
+      { id: 'pink', name: 'ピンク' }
+    ]
+  },
+  {
+    id: 'tracing-paper-1100',
+    name: 'トレーシングペーパー1100',
+    priceExcludingTax: 200,
+    priceIncludingTax: 220,
+    unit: 'm',
+    maxQuantity: 50
+  },
+  {
+    id: 'tracing-paper-2200',
+    name: 'トレーシングペーパー2200',
+    priceExcludingTax: 700,
+    priceIncludingTax: 770,
+    unit: 'm',
+    maxQuantity: 50
+  },
+  {
+    id: 'yupo-2200',
+    name: 'ユポ2200',
+    priceExcludingTax: 2000,
+    priceIncludingTax: 2200,
+    unit: 'm',
+    maxQuantity: 20
+  },
+  {
+    id: 'tough-neil-1830',
+    name: 'タフニール1830',
+    priceExcludingTax: 700,
+    priceIncludingTax: 770,
+    unit: 'm',
+    maxQuantity: 30
+  },
+  {
+    id: 'kent-paper',
+    name: 'ケント紙（四六判）',
+    priceExcludingTax: 300,
+    priceIncludingTax: 330,
+    unit: '枚',
+    maxQuantity: 50,
+    variants: [
+      { id: 'white', name: '白' },
+      { id: 'black', name: '黒' },
+      { id: 'grey', name: 'グレー' }
+    ]
+  }
 ];
