@@ -230,7 +230,7 @@ const Calendar: React.FC<CalendarProps> = ({
           }}
           dayCellContent={(arg) => {
             // 日間表示では日付数字を表示しない
-            if (currentView === 'timeGridDay') {
+            if (currentView === 'timeGridDay' || currentView === 'timeGridWeek') {
               return null;
             }
             return arg.date.getDate().toString();

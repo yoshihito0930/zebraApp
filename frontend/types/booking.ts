@@ -22,6 +22,8 @@ export interface BookingFormData {
   bookingType: 'temporary' | 'confirmed';
   purpose: string;
   userCount: number;
+  participants: number;
+  equipment: string[];
   companyName?: string;
   photographerName?: string;
   horizonProtection: 'yes' | 'no';
@@ -30,7 +32,10 @@ export interface BookingFormData {
   contactEmail: string;
   contactPhone: string;
   agreeToTerms: boolean;
+  agreeToPolicy: boolean;
   selectedOptions?: SelectedOption[];
+  selectedStartTime: Date;
+  selectedEndTime: Date;
 }
 
 export interface BookingFormErrors {
@@ -39,6 +44,8 @@ export interface BookingFormErrors {
   bookingType?: string;
   purpose?: string;
   userCount?: string;
+  participants?: string;
+  equipment?: string;
   companyName?: string;
   photographerName?: string;
   horizonProtection?: string;
@@ -47,6 +54,7 @@ export interface BookingFormErrors {
   contactEmail?: string;
   contactPhone?: string;
   agreeToTerms?: string;
+  agreeToPolicy?: string;
   general?: string;
 }
 
@@ -81,6 +89,12 @@ export const BOOKING_CONSTANTS = {
   },
   MAX_KEEP_POSITIONS: 3,
   TEMPORARY_BOOKING_DEADLINE_DAYS: 7
+};
+
+// Studio pricing constants
+export const STUDIO_PRICING = {
+  HOURLY_RATE_EXCLUDING_TAX: 5000, // 1時間あたり（税抜）
+  HOURLY_RATE_INCLUDING_TAX: 5500,  // 1時間あたり（税込）
 };
 
 // Booking type information

@@ -83,6 +83,8 @@ const BookingForm: React.FC<BookingFormProps> = ({
     bookingType: 'temporary',
     purpose: '',
     userCount: 1,
+    participants: 1,
+    equipment: [],
     companyName: '',
     photographerName: '',
     horizonProtection: 'no',
@@ -91,7 +93,10 @@ const BookingForm: React.FC<BookingFormProps> = ({
     contactEmail: '',
     contactPhone: '',
     agreeToTerms: false,
-    selectedOptions: []
+    agreeToPolicy: false,
+    selectedOptions: [],
+    selectedStartTime: selectedStartTime,
+    selectedEndTime: selectedEndTime
   });
 
   const [errors, setErrors] = useState<BookingFormErrors>({});
@@ -168,6 +173,10 @@ const BookingForm: React.FC<BookingFormProps> = ({
 
     if (!formData.agreeToTerms) {
       newErrors.agreeToTerms = '利用規約に同意してください';
+    }
+
+    if (!formData.agreeToPolicy) {
+      newErrors.agreeToPolicy = 'キャンセルポリシーに同意してください';
     }
 
     // Business rule validation
@@ -382,7 +391,14 @@ const BookingForm: React.FC<BookingFormProps> = ({
           label="利用人数"
           options={USER_COUNT_OPTIONS}
           value={formData.userCount.toString()}
-          onChange={(e) => updateFormData('userCount', parseInt(e.target.value))}
+          onChange={(e) => {
+            const count = parseInt(e.target.value);
+            setFormData(prev => ({ 
+              ...prev, 
+              userCount: count, 
+              participants: count 
+            }));
+          }}
           required
         />
       </div>
@@ -474,21 +490,41 @@ const BookingForm: React.FC<BookingFormProps> = ({
       />
 
       {/* Terms Agreement */}
-      <div className="flex items-start gap-3">
-        <input
-          type="checkbox"
-          id="agreeToTerms"
-          checked={formData.agreeToTerms}
-          onChange={(e) => updateFormData('agreeToTerms', e.target.checked)}
-          className="mt-1 w-4 h-4 text-primary focus:ring-primary"
-        />
-        <div className="flex-1">
-          <label htmlFor="agreeToTerms" className="text-sm text-gray-700 cursor-pointer">
-            <span className="text-red-500">*</span> 利用規約に同意します
-          </label>
-          {errors.agreeToTerms && (
-            <p className="mt-1 text-sm text-red-600">{errors.agreeToTerms}</p>
-          )}
+      <div className="space-y-3">
+        <div className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            id="agreeToTerms"
+            checked={formData.agreeToTerms}
+            onChange={(e) => updateFormData('agreeToTerms', e.target.checked)}
+            className="mt-1 w-4 h-4 text-primary focus:ring-primary"
+          />
+          <div className="flex-1">
+            <label htmlFor="agreeToTerms" className="text-sm text-gray-700 cursor-pointer">
+              <span className="text-red-500">*</span> 利用規約に同意します
+            </label>
+            {errors.agreeToTerms && (
+              <p className="mt-1 text-sm text-red-600">{errors.agreeToTerms}</p>
+            )}
+          </div>
+        </div>
+        
+        <div className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            id="agreeToPolicy"
+            checked={formData.agreeToPolicy}
+            onChange={(e) => updateFormData('agreeToPolicy', e.target.checked)}
+            className="mt-1 w-4 h-4 text-primary focus:ring-primary"
+          />
+          <div className="flex-1">
+            <label htmlFor="agreeToPolicy" className="text-sm text-gray-700 cursor-pointer">
+              <span className="text-red-500">*</span> キャンセルポリシーに同意します
+            </label>
+            {errors.agreeToPolicy && (
+              <p className="mt-1 text-sm text-red-600">{errors.agreeToPolicy}</p>
+            )}
+          </div>
         </div>
       </div>
 
@@ -507,7 +543,7 @@ const BookingForm: React.FC<BookingFormProps> = ({
           type="submit"
           variant="primary"
           isLoading={isLoading}
-          disabled={isLoading || !availabilityCheck?.available}
+          disabled={isLoading}
           className="flex-1"
         >
           {isLoading ? '申請中...' : '予約を申請する'}
