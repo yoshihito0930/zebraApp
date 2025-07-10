@@ -111,10 +111,10 @@ export default function CalendarPage() {
       <div className="max-w-7xl mx-auto">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-800 mb-2">
-            スタジオ予約カレンダー
+            スタジオゼブラ ご予約カレンダー
           </h1>
           <p className="text-gray-600">
-            空き状況の確認と予約の管理ができます
+            空き状況の確認と予約の申請ができます
           </p>
         </div>
 
@@ -174,11 +174,10 @@ export default function CalendarPage() {
               新規予約を申請する
             </h3>
             <ul className="space-y-2 text-sm text-gray-600">
-              <li>• 空いている日時をドラッグして選択</li>
+              <li>• カレンダー上の日時をクリック</li>
               <li>• 予約フォームが自動で開きます</li>
               <li>• 仮予約または本予約を選択可能</li>
               <li>• 最低2時間からご利用いただけます</li>
-              <li>• 営業時間：平日9:00-22:00</li>
             </ul>
           </div>
         </div>

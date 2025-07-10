@@ -8,7 +8,7 @@ export default function Home() {
     <main className="flex min-h-screen flex-col items-center p-8 md:p-24">
       <div className="max-w-5xl w-full">
         <h1 className="text-4xl font-bold text-primary mb-8 text-center">
-          撮影スタジオ予約管理システム
+          スタジオゼブラ 予約管理システム
         </h1>
         
         <div className="bg-white rounded-xl shadow-sm p-8 mb-8">
