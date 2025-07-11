@@ -83,6 +83,121 @@
 
 ### 3.1 基本コンポーネント
 
+#### 3.1.0 予約詳細表示コンポーネント
+
+**プライバシー保護原則**:
+- 自分の予約: 全ての詳細情報を表示
+- 他人の予約: 最小限の情報のみ表示（時間帯、予約種別のみ）
+- ユーザー認証状態に基づく動的表示制御
+
+**実装パターン**:
+```jsx
+// メインコンポーネント
+<BookingDetailsModal
+  isOpen={isOpen}
+  bookingId={bookingId}
+  onClose={onClose}
+  onCancel={onCancel}
+  onModify={onModify}
+/>
+
+// プライベート予約詳細（自分の予約）
+<PrivateBookingDetailsScreen
+  booking={booking}
+  onClose={onClose}
+  onCancel={onCancel}
+  onModify={onModify}
+  isLoading={isLoading}
+/>
+
+// パブリック予約詳細（他人の予約）
+<PublicBookingDetailsScreen
+  booking={booking}
+  onClose={onClose}
+  isLoading={isLoading}
+/>
+```
+
+**表示内容の分類**:
+
+1. **パブリック情報（他人の予約で表示）**:
+   - 予約時間帯
+   - 予約種別（仮予約/本予約）
+   - 占有状態のみ
+
+2. **プライベート情報（自分の予約のみ表示）**:
+   - 予約ステータス詳細
+   - 予約者情報
+   - 連絡先情報
+   - 選択オプション詳細
+   - 料金情報
+   - 予約履歴
+   - アクションボタン（キャンセル・変更）
+
+**アクション機能の実装**:
+```jsx
+// キャンセル申請
+const handleBookingCancel = async (bookingId) => {
+  // 権限チェック
+  if (!isOwnBooking) return;
+  
+  // キャンセルポリシー確認
+  const cancellationFee = calculateCancellationFee(booking);
+  const confirmed = await showCancellationConfirmation(cancellationFee);
+  
+  if (confirmed) {
+    await submitCancellationRequest(bookingId);
+  }
+};
+
+// 変更申請
+const handleBookingModify = async (bookingId) => {
+  // 権限チェック
+  if (!isOwnBooking) return;
+  
+  // 変更可能期間チェック
+  if (!isModifiable(booking)) {
+    showModificationNotAllowed();
+    return;
+  }
+  
+  openModificationForm(bookingId);
+};
+```
+
+**エラーハンドリングパターン**:
+
+1. **認証エラー**:
+   - ログイン画面へのリダイレクト促進
+   - セッション期限切れの明示
+
+2. **権限エラー**:
+   - アクセス権限なしの明示
+   - 適切なエラーメッセージ表示
+
+3. **ネットワークエラー**:
+   - リトライボタンの提供
+   - オフライン状態の明示
+
+4. **APIエラー**:
+   - エラー種別に応じたメッセージ表示
+   - ヘルプリンクの提供
+
+**キャンセルポリシー表示**:
+```jsx
+<CancellationPolicySection>
+  <PolicyTitle>キャンセルポリシー</PolicyTitle>
+  <PolicyRates>
+    <Rate period="6-4日前">50%</Rate>
+    <Rate period="3-1日前">80%</Rate>
+    <Rate period="当日">100%</Rate>
+  </PolicyRates>
+  <PolicyCalculation>
+    現在のキャンセル料: {calculateCurrentFee(booking)}円
+  </PolicyCalculation>
+</CancellationPolicySection>
+```
+
 #### 3.1.1 カレンダー表示
 
 **推奨事項**:

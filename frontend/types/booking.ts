@@ -233,3 +233,44 @@ export const AVAILABLE_BOOKING_OPTIONS: BookingOption[] = [
     ]
   }
 ];
+
+// Booking details types for display
+export interface PublicBookingInfo {
+  id: string;
+  bookingType: 'temporary' | 'confirmed';
+  startTime: string;
+  endTime: string;
+  status: 'occupied';
+}
+
+export interface PrivateBookingDetails {
+  id: string;
+  userId: string;
+  userName: string;
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  bookingType: 'temporary' | 'confirmed';
+  startTime: string;
+  endTime: string;
+  purpose: string;
+  userCount: number;
+  participants: number;
+  equipment: string[];
+  companyName?: string;
+  photographerName?: string;
+  horizonProtection: 'yes' | 'no';
+  specialRequests?: string;
+  contactName: string;
+  contactEmail: string;
+  contactPhone: string;
+  selectedOptions?: SelectedOption[];
+  createdAt: string;
+  updatedAt: string;
+  keepPosition?: number;
+}
+
+export interface BookingDetailsResponse {
+  success: boolean;
+  isOwnBooking: boolean;
+  booking: PublicBookingInfo | PrivateBookingDetails;
+  message?: string;
+}

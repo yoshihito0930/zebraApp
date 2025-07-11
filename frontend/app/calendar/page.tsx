@@ -2,14 +2,20 @@
 
 import React, { useState } from 'react';
 import { Calendar } from '../../components/calendar';
-import { BookingFormModal } from '../../components/booking';
+import { BookingFormModal, BookingDetailsModal } from '../../components/booking';
 import { BookingFormData, BookingSubmissionResponse } from '../../types/booking';
+import { useAuth } from '../../contexts/auth-context';
 
 export default function CalendarPage() {
+  const { user } = useAuth();
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [selectedStartTime, setSelectedStartTime] = useState<Date | null>(null);
   const [selectedEndTime, setSelectedEndTime] = useState<Date | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Booking details modal state
+  const [isBookingDetailsModalOpen, setIsBookingDetailsModalOpen] = useState(false);
+  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
 
   const handleDateSelect = (start: Date, end: Date) => {
     console.log('Date selected:', { start, end });
@@ -47,6 +53,14 @@ export default function CalendarPage() {
 
   const handleEventClick = (eventInfo: any) => {
     console.log('Event clicked:', eventInfo);
+    
+    // Extract booking ID from event
+    const bookingId = eventInfo.event.id;
+    
+    if (bookingId) {
+      setSelectedBookingId(bookingId);
+      setIsBookingDetailsModalOpen(true);
+    }
   };
 
   const handleBookingSubmit = async (formData: BookingFormData): Promise<BookingSubmissionResponse> => {
@@ -104,6 +118,23 @@ export default function CalendarPage() {
       setSelectedStartTime(null);
       setSelectedEndTime(null);
     }
+  };
+
+  const closeBookingDetailsModal = () => {
+    setIsBookingDetailsModalOpen(false);
+    setSelectedBookingId(null);
+  };
+
+  const handleBookingCancel = async (bookingId: string) => {
+    // TODO: Implement booking cancellation logic
+    console.log('Cancel booking:', bookingId);
+    alert('キャンセル機能は後のタスクで実装予定です');
+  };
+
+  const handleBookingModify = async (bookingId: string) => {
+    // TODO: Implement booking modification logic
+    console.log('Modify booking:', bookingId);
+    alert('変更機能は後のタスクで実装予定です');
   };
 
   return (
@@ -190,6 +221,15 @@ export default function CalendarPage() {
           onClose={closeBookingModal}
           onSubmit={handleBookingSubmit}
           isLoading={isSubmitting}
+        />
+
+        {/* Booking Details Modal */}
+        <BookingDetailsModal
+          isOpen={isBookingDetailsModalOpen}
+          bookingId={selectedBookingId}
+          onClose={closeBookingDetailsModal}
+          onCancel={handleBookingCancel}
+          onModify={handleBookingModify}
         />
       </div>
     </div>

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import '../styles/globals.css'
+import ClientProvider from './providers'
 
 export const metadata: Metadata = {
   title: '撮影スタジオ予約管理システム',
@@ -14,7 +15,9 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body className="bg-background min-h-screen">
-        {children}
+        <ClientProvider>
+          {children}
+        </ClientProvider>
       </body>
     </html>
   )
