@@ -6,3 +6,5 @@ export { default as BookingConfirmationScreen } from './BookingConfirmationScree
 export { default as PublicBookingDetailsScreen } from './PublicBookingDetailsScreen';
 export { default as PrivateBookingDetailsScreen } from './PrivateBookingDetailsScreen';
 export { default as BookingDetailsModal } from './BookingDetailsModal';
+export { default as BookingHistoryScreen } from './BookingHistoryScreen';
+export { default as BookingHistoryItem } from './BookingHistoryItem';

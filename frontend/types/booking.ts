@@ -274,3 +274,33 @@ export interface BookingDetailsResponse {
   booking: PublicBookingInfo | PrivateBookingDetails;
   message?: string;
 }
+
+// Booking history types
+export interface BookingHistoryItem {
+  id: string;
+  bookingType: 'temporary' | 'confirmed';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  startTime: string;
+  endTime: string;
+  purpose: string;
+  totalAmountIncludingTax: number;
+  totalAmountExcludingTax: number;
+  createdAt: string;
+  updatedAt: string;
+  keepPosition?: number;
+}
+
+export interface BookingHistoryResponse {
+  success: boolean;
+  bookings: BookingHistoryItem[];
+  totalCount: number;
+  hasNextPage: boolean;
+  message?: string;
+}
+
+export interface BookingHistoryFilters {
+  status?: string;
+  bookingType?: string;
+  limit?: number;
+  offset?: number;
+}

@@ -151,12 +151,20 @@ export default function ProfilePage() {
               <h2 className="text-xl font-medium text-gray-800">
                 {isPasswordSection ? 'パスワード変更' : 'プロフィール情報'}
               </h2>
-              <Button 
-                variant="secondary"
-                onClick={() => setIsPasswordSection(!isPasswordSection)}
-              >
-                {isPasswordSection ? 'プロフィール情報に戻る' : 'パスワード変更'}
-              </Button>
+              <div className="flex gap-2">
+                <Button 
+                  variant="secondary"
+                  onClick={() => router.push('/profile/booking-history')}
+                >
+                  予約履歴
+                </Button>
+                <Button 
+                  variant="secondary"
+                  onClick={() => setIsPasswordSection(!isPasswordSection)}
+                >
+                  {isPasswordSection ? 'プロフィール情報に戻る' : 'パスワード変更'}
+                </Button>
+              </div>
             </div>
           </div>
           
