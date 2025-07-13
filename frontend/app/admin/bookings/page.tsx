@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import BookingsList from './components/BookingsList';
 import BookingFilters from './components/BookingFilters';
+import AdminBookingCreateModal from './components/AdminBookingCreateModal';
+import BookingEditModal from './components/BookingEditModal';
 
 export interface BookingListItem {
   id: string;
@@ -56,6 +58,14 @@ export default function AdminBookingsPage() {
     hasNextPage: false
   });
   const [selectedBookings, setSelectedBookings] = useState<string[]>([]);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [editModal, setEditModal] = useState<{
+    isOpen: boolean;
+    booking: BookingListItem | null;
+  }>({
+    isOpen: false,
+    booking: null
+  });
 
   useEffect(() => {
     fetchBookings();
