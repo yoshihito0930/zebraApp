@@ -934,28 +934,798 @@ function calculateCancellationRate(bookings) {
   return (cancelledBookings / totalBookings) * 100;
 }
 
-// その他の統計関数は実装の簡略化のため基本的なモックを返す
-async function getBookingsByDateRange(startDate, endDate) { return []; }
-async function getTimeSlotDistribution(startDate, endDate) { return []; }
-async function getDayOfWeekDistribution(startDate, endDate) { return []; }
-async function getStatusTrends(startDate, endDate) { return []; }
-async function getAverageBookingDuration(startDate, endDate) { return 0; }
-async function getAverageResponseTime(startDate, endDate) { return 0; }
-async function getNewUsersInPeriod(startDate, endDate) { return []; }
-async function getActiveUsersInPeriod(startDate, endDate) { return []; }
-async function getUserEngagementMetrics(startDate, endDate) { return { engagementRate: 0, retention: 0, churnRate: 0 }; }
-async function getTopUsersByBookings(startDate, endDate, limit) { return []; }
-async function groupUsersByDay(users) { return {}; }
-async function getPendingBookingsDetailed() { return []; }
-async function getExpiringSoonBookingsDetailed() { return []; }
-async function getRecentCancellationsDetailed(days) { return []; }
-async function getFlaggedUsers() { return []; }
-async function getSystemAlerts() { return []; }
-async function getApprovedBookingsByDateRange(startDate, endDate) { return []; }
-async function getOptionUsageStats(startDate, endDate) { return []; }
-async function getPlanUsageStats(startDate, endDate) { return []; }
-async function getRevenueByDay(startDate, endDate) { return []; }
-async function calculateConversionRate(startDate, endDate) { return 0; }
-async function calculateRepeatCustomerRate(startDate, endDate) { return 0; }
-function calculateRevenueGrowth(revenueByDay) { return 0; }
-function calculateRevenueByBookingType(bookings) { return {}; }
+// ===== GSIを活用した効率的な統計クエリ実装 =====
+
+/**
+ * 日付範囲での予約取得（GSI3を活用）
+ */
+async function getBookingsByDateRange(startDate, endDate) {
+  try {
+    const allBookings = [];
+    const currentDate = new Date(startDate);
+    const end = new Date(endDate);
+    
+    // 日付範囲をバッチで並列処理
+    const datePromises = [];
+    while (currentDate <= end) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      
+      const params = {
+        TableName: TABLES.BOOKINGS,
+        IndexName: 'DateBookingsIndex',
+        KeyConditionExpression: 'GSI3PK = :dateKey',
+        ExpressionAttributeValues: {
+          ':dateKey': `DATE#${dateStr}`
+        }
+      };
+      
+      datePromises.push(dynamoDB.query(params).promise());
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    // 並列実行で高速化
+    const results = await Promise.all(datePromises);
+    results.forEach(result => {
+      if (result.Items) {
+        allBookings.push(...result.Items);
+      }
+    });
+    
+    return allBookings;
+  } catch (error) {
+    console.error('Get bookings by date range error:', error);
+    return [];
+  }
+}
+
+/**
+ * 時間帯別利用分析
+ */
+async function getTimeSlotDistribution(startDate, endDate) {
+  try {
+    const bookings = await getBookingsByDateRange(startDate, endDate);
+    const timeSlots = {};
+    
+    bookings.forEach(booking => {
+      if (booking.startTime && booking.status === BOOKING_STATUS.APPROVED) {
+        const startHour = new Date(booking.startTime).getHours();
+        const timeSlot = `${String(startHour).padStart(2, '0')}:00`;
+        
+        if (!timeSlots[timeSlot]) {
+          timeSlots[timeSlot] = {
+            hour: timeSlot,
+            count: 0,
+            totalDuration: 0,
+            revenue: 0
+          };
+        }
+        
+        timeSlots[timeSlot].count++;
+        
+        if (booking.endTime) {
+          const duration = (new Date(booking.endTime) - new Date(booking.startTime)) / (1000 * 60 * 60);
+          timeSlots[timeSlot].totalDuration += duration;
+          timeSlots[timeSlot].revenue += calculateBookingRevenue(booking);
+        }
+      }
+    });
+    
+    return Object.values(timeSlots).sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
+  } catch (error) {
+    console.error('Get time slot distribution error:', error);
+    return [];
+  }
+}
+
+/**
+ * 曜日別利用分析
+ */
+async function getDayOfWeekDistribution(startDate, endDate) {
+  try {
+    const bookings = await getBookingsByDateRange(startDate, endDate);
+    const dayOfWeek = ['日', '月', '火', '水', '木', '金', '土'];
+    const distribution = {};
+    
+    dayOfWeek.forEach((day, index) => {
+      distribution[day] = {
+        day,
+        dayIndex: index,
+        count: 0,
+        revenue: 0,
+        avgDuration: 0
+      };
+    });
+    
+    bookings.forEach(booking => {
+      if (booking.startTime && booking.status === BOOKING_STATUS.APPROVED) {
+        const date = new Date(booking.startTime);
+        const dayName = dayOfWeek[date.getDay()];
+        
+        distribution[dayName].count++;
+        distribution[dayName].revenue += calculateBookingRevenue(booking);
+        
+        if (booking.endTime) {
+          const duration = (new Date(booking.endTime) - new Date(booking.startTime)) / (1000 * 60 * 60);
+          distribution[dayName].avgDuration = (distribution[dayName].avgDuration + duration) / 2;
+        }
+      }
+    });
+    
+    return Object.values(distribution);
+  } catch (error) {
+    console.error('Get day of week distribution error:', error);
+    return [];
+  }
+}
+
+/**
+ * ステータストレンド分析（GSI2を活用）
+ */
+async function getStatusTrends(startDate, endDate) {
+  try {
+    const statuses = [BOOKING_STATUS.PENDING, BOOKING_STATUS.APPROVED, BOOKING_STATUS.REJECTED, BOOKING_STATUS.CANCELLED];
+    const trends = {};
+    
+    for (const status of statuses) {
+      const params = {
+        TableName: TABLES.BOOKINGS,
+        IndexName: 'StatusBookingsIndex',
+        KeyConditionExpression: 'GSI2PK = :statusKey',
+        FilterExpression: 'createdAt BETWEEN :startDate AND :endDate',
+        ExpressionAttributeValues: {
+          ':statusKey': `STATUS#${status}`,
+          ':startDate': startDate,
+          ':endDate': endDate + 'T23:59:59Z'
+        }
+      };
+      
+      const result = await dynamoDB.query(params).promise();
+      trends[status] = result.Items || [];
+    }
+    
+    return trends;
+  } catch (error) {
+    console.error('Get status trends error:', error);
+    return {};
+  }
+}
+
+/**
+ * 平均予約時間計算
+ */
+async function getAverageBookingDuration(startDate, endDate) {
+  try {
+    const bookings = await getBookingsByDateRange(startDate, endDate);
+    let totalDuration = 0;
+    let count = 0;
+    
+    bookings.forEach(booking => {
+      if (booking.startTime && booking.endTime && booking.status === BOOKING_STATUS.APPROVED) {
+        const duration = (new Date(booking.endTime) - new Date(booking.startTime)) / (1000 * 60 * 60);
+        totalDuration += duration;
+        count++;
+      }
+    });
+    
+    return count > 0 ? totalDuration / count : 0;
+  } catch (error) {
+    console.error('Get average booking duration error:', error);
+    return 0;
+  }
+}
+
+/**
+ * 管理者の平均応答時間計算
+ */
+async function getAverageResponseTime(startDate, endDate) {
+  try {
+    const bookings = await getBookingsByDateRange(startDate, endDate);
+    let totalResponseTime = 0;
+    let count = 0;
+    
+    bookings.forEach(booking => {
+      if (booking.createdAt && (booking.approvedAt || booking.rejectedAt)) {
+        const responseTime = booking.approvedAt || booking.rejectedAt;
+        const timeDiff = new Date(responseTime) - new Date(booking.createdAt);
+        totalResponseTime += timeDiff;
+        count++;
+      }
+    });
+    
+    // 時間単位で返す
+    return count > 0 ? (totalResponseTime / count) / (1000 * 60 * 60) : 0;
+  } catch (error) {
+    console.error('Get average response time error:', error);
+    return 0;
+  }
+}
+
+/**
+ * 期間内の新規ユーザー取得
+ */
+async function getNewUsersInPeriod(startDate, endDate) {
+  try {
+    const params = {
+      TableName: TABLES.USERS,
+      FilterExpression: 'createdAt BETWEEN :startDate AND :endDate',
+      ExpressionAttributeValues: {
+        ':startDate': startDate,
+        ':endDate': endDate + 'T23:59:59Z'
+      }
+    };
+    
+    const result = await dynamoDB.scan(params).promise();
+    return result.Items || [];
+  } catch (error) {
+    console.error('Get new users in period error:', error);
+    return [];
+  }
+}
+
+/**
+ * 期間内のアクティブユーザー取得
+ */
+async function getActiveUsersInPeriod(startDate, endDate) {
+  try {
+    const bookings = await getBookingsByDateRange(startDate, endDate);
+    const uniqueUsers = new Set();
+    const userDetails = {};
+    
+    bookings.forEach(booking => {
+      if (booking.userId) {
+        uniqueUsers.add(booking.userId);
+        if (!userDetails[booking.userId]) {
+          userDetails[booking.userId] = {
+            userId: booking.userId,
+            fullName: booking.userName,
+            email: booking.userEmail,
+            bookingCount: 0,
+            lastActivity: booking.createdAt
+          };
+        }
+        userDetails[booking.userId].bookingCount++;
+        
+        if (booking.createdAt > userDetails[booking.userId].lastActivity) {
+          userDetails[booking.userId].lastActivity = booking.createdAt;
+        }
+      }
+    });
+    
+    return Object.values(userDetails);
+  } catch (error) {
+    console.error('Get active users in period error:', error);
+    return [];
+  }
+}
+
+/**
+ * ユーザーエンゲージメント指標計算
+ */
+async function getUserEngagementMetrics(startDate, endDate) {
+  try {
+    const activeUsers = await getActiveUsersInPeriod(startDate, endDate);
+    const totalUsers = await getTotalUsersCount();
+    
+    const engagementRate = totalUsers > 0 ? (activeUsers.length / totalUsers) * 100 : 0;
+    
+    // リピート率計算
+    const repeatUsers = activeUsers.filter(user => user.bookingCount > 1);
+    const repeatRate = activeUsers.length > 0 ? (repeatUsers.length / activeUsers.length) * 100 : 0;
+    
+    // 簡易的なchurn rate計算（実際の実装では前期比較が必要）
+    const churnRate = Math.max(0, 100 - engagementRate);
+    
+    return {
+      engagementRate: Math.round(engagementRate * 100) / 100,
+      retention: Math.round(repeatRate * 100) / 100,
+      churnRate: Math.round(churnRate * 100) / 100,
+      activeUserCount: activeUsers.length,
+      repeatUserCount: repeatUsers.length
+    };
+  } catch (error) {
+    console.error('Get user engagement metrics error:', error);
+    return { engagementRate: 0, retention: 0, churnRate: 0 };
+  }
+}
+
+/**
+ * トップユーザー取得（予約数順）
+ */
+async function getTopUsersByBookings(startDate, endDate, limit = 10) {
+  try {
+    const activeUsers = await getActiveUsersInPeriod(startDate, endDate);
+    const bookings = await getBookingsByDateRange(startDate, endDate);
+    
+    // ユーザー別売上計算
+    const userStats = {};
+    bookings.forEach(booking => {
+      if (booking.userId && booking.status === BOOKING_STATUS.APPROVED) {
+        if (!userStats[booking.userId]) {
+          userStats[booking.userId] = {
+            userId: booking.userId,
+            fullName: booking.userName,
+            email: booking.userEmail,
+            bookingCount: 0,
+            totalRevenue: 0,
+            lastBooking: booking.createdAt
+          };
+        }
+        
+        userStats[booking.userId].bookingCount++;
+        userStats[booking.userId].totalRevenue += calculateBookingRevenue(booking);
+        
+        if (booking.createdAt > userStats[booking.userId].lastBooking) {
+          userStats[booking.userId].lastBooking = booking.createdAt;
+        }
+      }
+    });
+    
+    return Object.values(userStats)
+      .sort((a, b) => b.bookingCount - a.bookingCount)
+      .slice(0, limit);
+  } catch (error) {
+    console.error('Get top users by bookings error:', error);
+    return [];
+  }
+}
+
+/**
+ * ユーザーを日別にグループ化
+ */
+function groupUsersByDay(users) {
+  const grouped = {};
+  
+  users.forEach(user => {
+    const date = user.createdAt ? user.createdAt.split('T')[0] : null;
+    if (date) {
+      if (!grouped[date]) {
+        grouped[date] = 0;
+      }
+      grouped[date]++;
+    }
+  });
+  
+  return grouped;
+}
+
+/**
+ * 承認待ち予約詳細取得（GSI2活用）
+ */
+async function getPendingBookingsDetailed() {
+  try {
+    const params = {
+      TableName: TABLES.BOOKINGS,
+      IndexName: 'StatusBookingsIndex',
+      KeyConditionExpression: 'GSI2PK = :statusKey',
+      ExpressionAttributeValues: {
+        ':statusKey': `STATUS#${BOOKING_STATUS.PENDING}`
+      },
+      ScanIndexForward: false // 最新順
+    };
+    
+    const result = await dynamoDB.query(params).promise();
+    return (result.Items || []).map(booking => ({
+      bookingId: booking.bookingId,
+      userId: booking.userId,
+      userName: booking.userName,
+      userEmail: booking.userEmail,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      bookingType: booking.bookingType,
+      createdAt: booking.createdAt,
+      purpose: booking.purpose,
+      totalRevenue: calculateBookingRevenue(booking),
+      daysSincePending: Math.floor((new Date() - new Date(booking.createdAt)) / (1000 * 60 * 60 * 24))
+    }));
+  } catch (error) {
+    console.error('Get pending bookings detailed error:', error);
+    return [];
+  }
+}
+
+/**
+ * 期限切れ間近の予約詳細取得
+ */
+async function getExpiringSoonBookingsDetailed() {
+  try {
+    const now = new Date();
+    const soonThreshold = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24時間後
+    
+    const params = {
+      TableName: TABLES.BOOKINGS,
+      IndexName: 'StatusBookingsIndex',
+      KeyConditionExpression: 'GSI2PK = :statusKey',
+      FilterExpression: 'bookingType = :tempType AND confirmationDeadline <= :threshold AND confirmationDeadline > :now',
+      ExpressionAttributeValues: {
+        ':statusKey': `STATUS#${BOOKING_STATUS.APPROVED}`,
+        ':tempType': BOOKING_TYPE.TEMPORARY,
+        ':threshold': soonThreshold.toISOString(),
+        ':now': now.toISOString()
+      }
+    };
+    
+    const result = await dynamoDB.query(params).promise();
+    return (result.Items || []).map(booking => ({
+      bookingId: booking.bookingId,
+      userId: booking.userId,
+      userName: booking.userName,
+      userEmail: booking.userEmail,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      confirmationDeadline: booking.confirmationDeadline,
+      hoursUntilExpiry: Math.floor((new Date(booking.confirmationDeadline) - now) / (1000 * 60 * 60))
+    }));
+  } catch (error) {
+    console.error('Get expiring soon bookings detailed error:', error);
+    return [];
+  }
+}
+
+/**
+ * 最近のキャンセル詳細取得
+ */
+async function getRecentCancellationsDetailed(days) {
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    
+    const params = {
+      TableName: TABLES.BOOKINGS,
+      IndexName: 'StatusBookingsIndex',
+      KeyConditionExpression: 'GSI2PK = :statusKey',
+      FilterExpression: 'updatedAt >= :cutoffDate',
+      ExpressionAttributeValues: {
+        ':statusKey': `STATUS#${BOOKING_STATUS.CANCELLED}`,
+        ':cutoffDate': cutoffDate.toISOString()
+      },
+      ScanIndexForward: false
+    };
+    
+    const result = await dynamoDB.query(params).promise();
+    return (result.Items || []).map(booking => ({
+      bookingId: booking.bookingId,
+      userId: booking.userId,
+      userName: booking.userName,
+      userEmail: booking.userEmail,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      cancelledAt: booking.updatedAt,
+      cancellationReason: booking.cancellationReason || 'N/A',
+      daysSinceCancellation: Math.floor((new Date() - new Date(booking.updatedAt)) / (1000 * 60 * 60 * 24))
+    }));
+  } catch (error) {
+    console.error('Get recent cancellations detailed error:', error);
+    return [];
+  }
+}
+
+/**
+ * フラグ付きユーザー取得（頻繁なキャンセル等）
+ */
+async function getFlaggedUsers() {
+  try {
+    // キャンセル頻度が高いユーザーを特定
+    const params = {
+      TableName: TABLES.BOOKINGS,
+      IndexName: 'StatusBookingsIndex',
+      KeyConditionExpression: 'GSI2PK = :statusKey',
+      ExpressionAttributeValues: {
+        ':statusKey': `STATUS#${BOOKING_STATUS.CANCELLED}`
+      }
+    };
+    
+    const result = await dynamoDB.query(params).promise();
+    const cancellations = result.Items || [];
+    
+    // ユーザー別キャンセル数集計
+    const userCancellations = {};
+    cancellations.forEach(booking => {
+      if (booking.userId) {
+        if (!userCancellations[booking.userId]) {
+          userCancellations[booking.userId] = {
+            userId: booking.userId,
+            userName: booking.userName,
+            userEmail: booking.userEmail,
+            cancellationCount: 0,
+            lastCancellation: null
+          };
+        }
+        userCancellations[booking.userId].cancellationCount++;
+        
+        if (!userCancellations[booking.userId].lastCancellation || 
+            booking.updatedAt > userCancellations[booking.userId].lastCancellation) {
+          userCancellations[booking.userId].lastCancellation = booking.updatedAt;
+        }
+      }
+    });
+    
+    // 3回以上キャンセルしたユーザーをフラグ対象とする
+    return Object.values(userCancellations)
+      .filter(user => user.cancellationCount >= 3)
+      .sort((a, b) => b.cancellationCount - a.cancellationCount);
+  } catch (error) {
+    console.error('Get flagged users error:', error);
+    return [];
+  }
+}
+
+/**
+ * システムアラート取得
+ */
+async function getSystemAlerts() {
+  try {
+    const alerts = [];
+    
+    // 高負荷時間帯チェック
+    const today = new Date().toISOString().split('T')[0];
+    const todayBookings = await getBookingsCountByDate(today);
+    
+    if (todayBookings > 10) {
+      alerts.push({
+        type: 'high_load',
+        severity: 'warning',
+        message: `本日の予約数が${todayBookings}件と高負荷になっています`,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // 承認待ち予約チェック
+    const pendingCount = await getPendingTasksCount();
+    if (pendingCount > 5) {
+      alerts.push({
+        type: 'pending_overflow',
+        severity: 'high',
+        message: `承認待ち予約が${pendingCount}件あります`,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // 期限切れ間近チェック
+    const expiringSoon = await getExpiringSoonCount();
+    if (expiringSoon > 0) {
+      alerts.push({
+        type: 'expiring_soon',
+        severity: 'medium',
+        message: `${expiringSoon}件の仮予約が24時間以内に期限切れになります`,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    return alerts;
+  } catch (error) {
+    console.error('Get system alerts error:', error);
+    return [];
+  }
+}
+
+/**
+ * 承認済み予約を日付範囲で取得
+ */
+async function getApprovedBookingsByDateRange(startDate, endDate) {
+  try {
+    const allBookings = await getBookingsByDateRange(startDate, endDate);
+    return allBookings.filter(booking => booking.status === BOOKING_STATUS.APPROVED);
+  } catch (error) {
+    console.error('Get approved bookings by date range error:', error);
+    return [];
+  }
+}
+
+/**
+ * オプション使用統計
+ */
+async function getOptionUsageStats(startDate, endDate) {
+  try {
+    const approvedBookings = await getApprovedBookingsByDateRange(startDate, endDate);
+    const optionStats = {};
+    
+    approvedBookings.forEach(booking => {
+      if (booking.options && Array.isArray(booking.options)) {
+        booking.options.forEach(option => {
+          if (!optionStats[option.id]) {
+            optionStats[option.id] = {
+              optionId: option.id,
+              name: option.name,
+              totalUsage: 0,
+              totalQuantity: 0,
+              totalRevenue: 0,
+              usageRate: 0
+            };
+          }
+          
+          optionStats[option.id].totalUsage++;
+          optionStats[option.id].totalQuantity += option.quantity || 1;
+          optionStats[option.id].totalRevenue += (option.taxIncludedPrice || option.price || 0) * (option.quantity || 1);
+        });
+      }
+    });
+    
+    // 使用率計算
+    const totalBookings = approvedBookings.length;
+    Object.values(optionStats).forEach(stat => {
+      stat.usageRate = totalBookings > 0 ? (stat.totalUsage / totalBookings) * 100 : 0;
+    });
+    
+    return Object.values(optionStats).sort((a, b) => b.totalRevenue - a.totalRevenue);
+  } catch (error) {
+    console.error('Get option usage stats error:', error);
+    return [];
+  }
+}
+
+/**
+ * プラン使用統計
+ */
+async function getPlanUsageStats(startDate, endDate) {
+  try {
+    const approvedBookings = await getApprovedBookingsByDateRange(startDate, endDate);
+    const planStats = {};
+    
+    approvedBookings.forEach(booking => {
+      const plan = booking.plan || 'unknown';
+      
+      if (!planStats[plan]) {
+        planStats[plan] = {
+          plan: plan,
+          planDetails: booking.planDetails || '',
+          totalBookings: 0,
+          totalRevenue: 0,
+          avgDuration: 0
+        };
+      }
+      
+      planStats[plan].totalBookings++;
+      planStats[plan].totalRevenue += calculateBookingRevenue(booking);
+      
+      if (booking.startTime && booking.endTime) {
+        const duration = (new Date(booking.endTime) - new Date(booking.startTime)) / (1000 * 60 * 60);
+        planStats[plan].avgDuration = (planStats[plan].avgDuration + duration) / 2;
+      }
+    });
+    
+    return Object.values(planStats).sort((a, b) => b.totalRevenue - a.totalRevenue);
+  } catch (error) {
+    console.error('Get plan usage stats error:', error);
+    return [];
+  }
+}
+
+/**
+ * 日別売上データ取得
+ */
+async function getRevenueByDay(startDate, endDate) {
+  try {
+    const approvedBookings = await getApprovedBookingsByDateRange(startDate, endDate);
+    const revenueByDay = {};
+    
+    // 日付範囲の全日をゼロで初期化
+    const currentDate = new Date(startDate);
+    const end = new Date(endDate);
+    
+    while (currentDate <= end) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      revenueByDay[dateStr] = {
+        date: dateStr,
+        revenue: 0,
+        bookingCount: 0,
+        avgBookingValue: 0
+      };
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    // 実際の売上データを集計
+    approvedBookings.forEach(booking => {
+      const date = booking.startTime ? booking.startTime.split('T')[0] : null;
+      if (date && revenueByDay[date]) {
+        const revenue = calculateBookingRevenue(booking);
+        revenueByDay[date].revenue += revenue;
+        revenueByDay[date].bookingCount++;
+      }
+    });
+    
+    // 平均予約価値を計算
+    Object.values(revenueByDay).forEach(day => {
+      day.avgBookingValue = day.bookingCount > 0 ? day.revenue / day.bookingCount : 0;
+    });
+    
+    return Object.values(revenueByDay).sort((a, b) => a.date.localeCompare(b.date));
+  } catch (error) {
+    console.error('Get revenue by day error:', error);
+    return [];
+  }
+}
+
+/**
+ * コンバージョン率計算
+ */
+async function calculateConversionRate(startDate, endDate) {
+  try {
+    const statusTrends = await getStatusTrends(startDate, endDate);
+    const totalApplications = (statusTrends[BOOKING_STATUS.PENDING] || []).length + 
+                             (statusTrends[BOOKING_STATUS.APPROVED] || []).length + 
+                             (statusTrends[BOOKING_STATUS.REJECTED] || []).length;
+    const approvedApplications = (statusTrends[BOOKING_STATUS.APPROVED] || []).length;
+    
+    return totalApplications > 0 ? (approvedApplications / totalApplications) * 100 : 0;
+  } catch (error) {
+    console.error('Calculate conversion rate error:', error);
+    return 0;
+  }
+}
+
+/**
+ * リピート顧客率計算
+ */
+async function calculateRepeatCustomerRate(startDate, endDate) {
+  try {
+    const activeUsers = await getActiveUsersInPeriod(startDate, endDate);
+    const repeatUsers = activeUsers.filter(user => user.bookingCount > 1);
+    
+    return activeUsers.length > 0 ? (repeatUsers.length / activeUsers.length) * 100 : 0;
+  } catch (error) {
+    console.error('Calculate repeat customer rate error:', error);
+    return 0;
+  }
+}
+
+/**
+ * 売上成長率計算
+ */
+function calculateRevenueGrowth(revenueByDay) {
+  if (revenueByDay.length < 2) return 0;
+  
+  const firstDayRevenue = revenueByDay[0].revenue;
+  const lastDayRevenue = revenueByDay[revenueByDay.length - 1].revenue;
+  
+  if (firstDayRevenue === 0) return lastDayRevenue > 0 ? 100 : 0;
+  
+  return ((lastDayRevenue - firstDayRevenue) / firstDayRevenue) * 100;
+}
+
+/**
+ * 予約タイプ別売上計算
+ */
+function calculateRevenueByBookingType(bookings) {
+  const typeRevenue = {
+    [BOOKING_TYPE.TEMPORARY]: 0,
+    [BOOKING_TYPE.CONFIRMED]: 0
+  };
+  
+  bookings.forEach(booking => {
+    if (booking.status === BOOKING_STATUS.APPROVED) {
+      const revenue = calculateBookingRevenue(booking);
+      if (typeRevenue.hasOwnProperty(booking.bookingType)) {
+        typeRevenue[booking.bookingType] += revenue;
+      }
+    }
+  });
+  
+  return typeRevenue;
+}
+
+/**
+ * 個別予約の売上計算ヘルパー
+ */
+function calculateBookingRevenue(booking) {
+  let revenue = 0;
+  
+  // 基本料金計算
+  if (booking.startTime && booking.endTime) {
+    const duration = (new Date(booking.endTime) - new Date(booking.startTime)) / (1000 * 60 * 60);
+    revenue += duration * 5500; // 基本料金（税込）
+  }
+  
+  // オプション料金計算
+  if (booking.options && Array.isArray(booking.options)) {
+    booking.options.forEach(option => {
+      revenue += (option.taxIncludedPrice || option.price || 0) * (option.quantity || 1);
+    });
+  }
+  
+  // 保険料金計算
+  if (booking.insurance && booking.insurance.selected) {
+    revenue += booking.insurance.taxIncludedPrice || booking.insurance.price || 0;
+  }
+  
+  return revenue;
+}

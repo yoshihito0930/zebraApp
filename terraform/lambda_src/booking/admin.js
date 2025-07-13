@@ -38,11 +38,18 @@ exports.handler = async (event) => {
     
     // HTTP メソッドとパスに基づいて処理を分岐
     const path = event.path;
+    const method = event.httpMethod;
     
     if (path.includes('/approve')) {
       return await handleApproveBooking(event, userId);
     } else if (path.includes('/reject')) {
       return await handleRejectBooking(event, userId);
+    } else if (path.includes('/search') && method === 'POST') {
+      return await handleAdvancedBookingSearch(event, userId);
+    } else if (path.includes('/bulk-action') && method === 'POST') {
+      return await handleBulkAction(event, userId);
+    } else if (path.includes('/export') && method === 'POST') {
+      return await handleBookingExport(event, userId);
     } else {
       return createErrorResponse(404, ERROR_CODES.NOT_FOUND, 'エンドポイントが見つかりません。');
     }
@@ -542,6 +549,320 @@ async function sendRejectionNotification(booking) {
     console.error('Rejection notification error:', error);
     throw error;
   }
+}
+
+/**
+ * 高度な予約検索（管理者用GSI活用）
+ */
+async function handleAdvancedBookingSearch(event, adminUserId) {
+  try {
+    const searchCriteria = JSON.parse(event.body || '{}');
+    
+    const {
+      status,
+      bookingType,
+      startDate,
+      endDate,
+      userId,
+      userName,
+      sortBy = 'createdAt',
+      sortOrder = 'desc',
+      limit = 50,
+      offset = 0
+    } = searchCriteria;
+    
+    let searchResults = [];
+    
+    // GSIを活用した効率的な検索
+    if (status) {
+      // ステータス別検索（GSI2使用）
+      const params = {
+        TableName: TABLES.BOOKINGS,
+        IndexName: 'StatusBookingsIndex',
+        KeyConditionExpression: 'GSI2PK = :statusKey',
+        ExpressionAttributeValues: {
+          ':statusKey': `STATUS#${status}`
+        }
+      };
+      
+      const result = await dynamoDB.query(params).promise();
+      searchResults = result.Items || [];
+    } else if (userId) {
+      // ユーザー別検索（GSI1使用）
+      const params = {
+        TableName: TABLES.BOOKINGS,
+        IndexName: 'UserBookingsIndex',
+        KeyConditionExpression: 'GSI1PK = :userKey',
+        ExpressionAttributeValues: {
+          ':userKey': `USER#${userId}`
+        }
+      };
+      
+      const result = await dynamoDB.query(params).promise();
+      searchResults = result.Items || [];
+    } else if (startDate && endDate) {
+      // 日付範囲検索（GSI3使用）
+      searchResults = await searchByDateRange(startDate, endDate);
+    } else {
+      // 全件検索（制限付き）
+      const params = {
+        TableName: TABLES.BOOKINGS,
+        Limit: 1000
+      };
+      
+      const result = await dynamoDB.scan(params).promise();
+      searchResults = result.Items || [];
+    }
+    
+    // 追加フィルタリング
+    if (bookingType) {
+      searchResults = searchResults.filter(booking => booking.bookingType === bookingType);
+    }
+    
+    if (userName) {
+      const nameFilter = userName.toLowerCase();
+      searchResults = searchResults.filter(booking => 
+        booking.userName && booking.userName.toLowerCase().includes(nameFilter)
+      );
+    }
+    
+    // ソート処理
+    searchResults.sort((a, b) => {
+      let aValue = a[sortBy];
+      let bValue = b[sortBy];
+      
+      if (sortOrder === 'desc') {
+        return bValue > aValue ? 1 : -1;
+      } else {
+        return aValue > bValue ? 1 : -1;
+      }
+    });
+    
+    // ページネーション
+    const total = searchResults.length;
+    const paginatedResults = searchResults.slice(offset, offset + limit);
+    
+    return createSuccessResponse(200, {
+      results: paginatedResults.map(booking => formatBookingForResponse(booking)),
+      pagination: {
+        total,
+        offset,
+        limit,
+        hasMore: offset + limit < total
+      },
+      searchCriteria
+    });
+    
+  } catch (error) {
+    console.error('Advanced booking search error:', error);
+    return createErrorResponse(500, ERROR_CODES.SERVER_ERROR, '高度検索処理中にエラーが発生しました。');
+  }
+}
+
+/**
+ * 一括操作処理
+ */
+async function handleBulkAction(event, adminUserId) {
+  try {
+    const bulkRequest = JSON.parse(event.body || '{}');
+    const { action, bookingIds } = bulkRequest;
+    
+    if (!action || !bookingIds || !Array.isArray(bookingIds)) {
+      return createErrorResponse(400, ERROR_CODES.INVALID_PARAMETERS, '不正な一括操作リクエストです。');
+    }
+    
+    const results = [];
+    const errors = [];
+    
+    for (const bookingId of bookingIds) {
+      try {
+        let result;
+        
+        if (action === 'approve') {
+          result = await processBulkApproval(bookingId, adminUserId);
+        } else if (action === 'reject') {
+          result = await processBulkRejection(bookingId, adminUserId);
+        } else {
+          throw new Error(`未対応のアクション: ${action}`);
+        }
+        
+        results.push({
+          bookingId,
+          success: true,
+          result
+        });
+      } catch (error) {
+        errors.push({
+          bookingId,
+          success: false,
+          error: error.message
+        });
+      }
+    }
+    
+    return createSuccessResponse(200, {
+      action,
+      processedCount: bookingIds.length,
+      successCount: results.length,
+      errorCount: errors.length,
+      results,
+      errors
+    });
+    
+  } catch (error) {
+    console.error('Bulk action error:', error);
+    return createErrorResponse(500, ERROR_CODES.SERVER_ERROR, '一括操作処理中にエラーが発生しました。');
+  }
+}
+
+/**
+ * エクスポート処理
+ */
+async function handleBookingExport(event, adminUserId) {
+  try {
+    const exportRequest = JSON.parse(event.body || '{}');
+    const {
+      format = 'json',
+      startDate,
+      endDate,
+      status,
+      limit = 5000
+    } = exportRequest;
+    
+    let exportData = [];
+    
+    if (status) {
+      const params = {
+        TableName: TABLES.BOOKINGS,
+        IndexName: 'StatusBookingsIndex',
+        KeyConditionExpression: 'GSI2PK = :statusKey',
+        ExpressionAttributeValues: {
+          ':statusKey': `STATUS#${status}`
+        },
+        Limit: limit
+      };
+      
+      const result = await dynamoDB.query(params).promise();
+      exportData = result.Items || [];
+    } else if (startDate && endDate) {
+      exportData = await searchByDateRange(startDate, endDate);
+    }
+    
+    return createSuccessResponse(200, {
+      format,
+      recordCount: exportData.length,
+      data: exportData,
+      exportedAt: new Date().toISOString(),
+      exportedBy: adminUserId
+    });
+    
+  } catch (error) {
+    console.error('Booking export error:', error);
+    return createErrorResponse(500, ERROR_CODES.SERVER_ERROR, 'エクスポート処理中にエラーが発生しました。');
+  }
+}
+
+/**
+ * 日付範囲での検索（GSI3活用）
+ */
+async function searchByDateRange(startDate, endDate) {
+  const bookings = [];
+  const currentDate = new Date(startDate);
+  const end = new Date(endDate);
+  
+  const dateQueries = [];
+  while (currentDate <= end) {
+    const dateStr = currentDate.toISOString().split('T')[0];
+    
+    const params = {
+      TableName: TABLES.BOOKINGS,
+      IndexName: 'DateBookingsIndex',
+      KeyConditionExpression: 'GSI3PK = :dateKey',
+      ExpressionAttributeValues: {
+        ':dateKey': `DATE#${dateStr}`
+      }
+    };
+    
+    dateQueries.push(dynamoDB.query(params).promise());
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+  
+  const results = await Promise.all(dateQueries);
+  results.forEach(result => {
+    if (result.Items) {
+      bookings.push(...result.Items);
+    }
+  });
+  
+  return bookings;
+}
+
+/**
+ * 一括承認処理
+ */
+async function processBulkApproval(bookingId, adminUserId) {
+  const booking = await getBookingById(bookingId);
+  if (!booking || booking.status !== BOOKING_STATUS.PENDING) {
+    throw new Error('承認できない予約です');
+  }
+  
+  const now = new Date().toISOString();
+  const updatedBookingData = {
+    ...booking,
+    status: BOOKING_STATUS.APPROVED,
+    approvedBy: adminUserId,
+    approvedAt: now,
+    updatedAt: now
+  };
+  
+  updatedBookingData.GSI2PK = `STATUS#${BOOKING_STATUS.APPROVED}`;
+  
+  const params = {
+    TableName: TABLES.BOOKINGS,
+    Item: updatedBookingData
+  };
+  
+  await dynamoDB.put(params).promise();
+  
+  return {
+    bookingId,
+    status: 'approved',
+    approvedAt: now
+  };
+}
+
+/**
+ * 一括拒否処理
+ */
+async function processBulkRejection(bookingId, adminUserId) {
+  const booking = await getBookingById(bookingId);
+  if (!booking || booking.status !== BOOKING_STATUS.PENDING) {
+    throw new Error('拒否できない予約です');
+  }
+  
+  const now = new Date().toISOString();
+  const updatedBookingData = {
+    ...booking,
+    status: BOOKING_STATUS.REJECTED,
+    rejectedBy: adminUserId,
+    rejectedAt: now,
+    updatedAt: now
+  };
+  
+  updatedBookingData.GSI2PK = `STATUS#${BOOKING_STATUS.REJECTED}`;
+  
+  const params = {
+    TableName: TABLES.BOOKINGS,
+    Item: updatedBookingData
+  };
+  
+  await dynamoDB.put(params).promise();
+  
+  return {
+    bookingId,
+    status: 'rejected',
+    rejectedAt: now
+  };
 }
 
 /**
