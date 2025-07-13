@@ -244,7 +244,7 @@ export default function PendingTasks() {
         <div className="mt-6 pt-4 border-t">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <button
-              onClick={() => router.push('/admin/bookings?filter=pending')}
+              onClick={() => router.push('/admin/bookings/pending')}
               className="flex items-center justify-between p-3 text-left border rounded-lg hover:bg-gray-50"
             >
               <div>
