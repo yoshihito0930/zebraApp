@@ -77,7 +77,7 @@ resource "aws_lambda_event_source_mapping" "booking_stream" {
   maximum_batching_window_in_seconds = 5
   
   # 並行処理設定
-  parallelization_factor = 2
+  parallelization_factor = 1
   
   # エラーハンドリング設定
   maximum_retry_attempts = 3

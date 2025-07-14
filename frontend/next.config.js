@@ -1,7 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // 本番環境での設定
-  output: 'standalone',
+  output: 'export',
+  trailingSlash: false,
+  skipTrailingSlashRedirect: true,
   
   // 開発サーバー設定
   experimental: {
@@ -10,7 +12,7 @@ const nextConfig = {
   
   // 画像最適化設定
   images: {
-    unoptimized: false,
+    unoptimized: true,
   },
   
   // 環境変数設定
